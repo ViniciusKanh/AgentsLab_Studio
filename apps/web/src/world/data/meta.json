@@ -1,0 +1,42 @@
+{
+ "frameW": 16,
+ "frameH": 24,
+ "framesPerChar": 27,
+ "cast": [
+  "vinicius",
+  "analista",
+  "pesquisadora",
+  "redatora",
+  "engenheiro",
+  "rag",
+  "ops",
+  "bi",
+  "revisor",
+  "orquestradora",
+  "planejador",
+  "assistente",
+  "robo2",
+  "devops"
+ ],
+ "stateIcons": [
+  "working",
+  "planning",
+  "collaborating",
+  "reviewing",
+  "completed",
+  "failed",
+  "paused",
+  "idle"
+ ],
+ "emotes": [
+  "heart",
+  "question",
+  "exclaim",
+  "music",
+  "coffee",
+  "idea",
+  "zzz",
+  "check",
+  "wave"
+ ]
+}

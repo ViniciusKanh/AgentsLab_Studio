@@ -1,0 +1,33 @@
+# Release: ao criar uma tag vX.Y.Z, gera o bundle estático (dist.zip) e anexa à release do GitHub.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Build
+        working-directory: apps/web
+        run: npm ci && npm run build && npm test
+      - name: Empacotar bundle
+        run: |
+          cd apps/web/dist && zip -r ../../../agentslab-web-${GITHUB_REF_NAME}.zip . && cd -
+          tar -czf agentslab-api-${GITHUB_REF_NAME}.tar.gz -C apps api --exclude='__pycache__' --exclude='data'
+      - name: Publicar release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" agentslab-web-${GITHUB_REF_NAME}.zip agentslab-api-${GITHUB_REF_NAME}.tar.gz \
+            --title "AgentsLab_Studio $GITHUB_REF_NAME" --generate-notes

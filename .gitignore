@@ -1,0 +1,27 @@
+# dependências e builds
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+apps/web/e2e/.results/
+playwright-report/
+test-results/
+# ambiente
+.env
+.env.*
+!.env.example
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+# SO/IDE
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.tmp.mjs
+apps/api/data/
+docs/media/*.webm
+docs/media/.video-tmp/

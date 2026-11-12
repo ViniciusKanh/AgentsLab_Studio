@@ -1,0 +1,61 @@
+# Vitrine visual: abre o app no navegador, interage, tira prints, grava vídeo e gera GIFs.
+# Os arquivos ficam como artefato e (em pushes na main) são commitados em docs/media
+# para manter o README sempre atualizado.
+name: Showcase (prints, vídeo e GIF)
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_media:
+        description: 'Commitar a mídia gerada em docs/media'
+        type: boolean
+        default: true
+  push:
+    branches: [main]
+    paths:
+      - 'apps/web/src/**'
+      - 'apps/web/public/**'
+      - 'tools/pixelart/**'
+      - '.github/workflows/showcase.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: showcase
+  cancel-in-progress: true
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Capturar prints, vídeo e GIFs
+        run: npm run media
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agentslab-media
+          path: docs/media
+      - name: Commitar mídia no repositório
+        if: github.event_name == 'push' || inputs.commit_media
+        working-directory: .
+        run: |
+          rm -f docs/media/*.webm
+          git config user.name "agentslab-bot"
+          git config user.email "agentslab-bot@users.noreply.github.com"
+          git add docs/media
+          git diff --cached --quiet || git commit -m "docs(media): atualizar capturas do app [skip ci]"
+          git push
