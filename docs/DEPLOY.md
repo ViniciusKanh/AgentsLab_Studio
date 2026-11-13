@@ -30,7 +30,12 @@ AGENTSLAB_CORS_ORIGINS=https://agentslab.vercel.app,https://agentslab-studio.pag
 AGENTSLAB_CORS_ORIGIN_REGEX=https://.*\.vercel\.app|https://.*\.agentslab-studio\.pages\.dev
 ```
 
-- **Render**: New → Web Service → repositório → *Root Directory* `apps/api`, *Runtime* Docker; adicione as variáveis; *Health Check Path* `/health`. O plano gratuito hiberna após inatividade — projetos interrompidos são retomados ao acordar (`recover()`), mas prefira um plano pago para execuções longas.
+- **Render (gratuito — caminho recomendado)**: o repositório já tem `render.yaml`.
+  1. render.com → entrar com o GitHub → **New → Blueprint** → escolha o repositório → *Apply*.
+  2. Preencha os 4 segredos pedidos (`AGENTSLAB_DATABASE_URL`, `AGENTSLAB_SUPABASE_URL`, `AGENTSLAB_MASTER_KEY` — **a mesma do seu `.env`** —, `AGENTSLAB_CORS_ORIGINS` = endereço do Cloudflare Pages).
+  3. Aguarde o build (alguns minutos) e teste `https://agentslab-api.onrender.com/health`.
+  - O plano gratuito hiberna após ~15 min sem acesso. O backend se mantém acordado acessando o próprio endereço público a cada 5 min (`app/services/keepalive.py`; `AGENTSLAB_KEEPALIVE_MODE=always`, usa `RENDER_EXTERNAL_URL`). Um serviço ligado o mês todo usa ~744 h das ~750 h gratuitas — não crie um segundo serviço gratuito na mesma conta, ou use `busy` (acordado só com projeto em execução).
+  - Republica sozinho a cada push que altera `apps/api/` (`buildFilter`). Memória medida: ~230 MB com LiteLLM carregado (limite gratuito: 512 MB).
 - **Hugging Face Space**: Space Docker com o conteúdo de `apps/api`, variável `PORT=7860`, segredos em *Settings → Variables and secrets*. Use Space **privado** só se o frontend não precisar acessá-lo diretamente; com login Supabase, o Space público é seguro (todas as rotas exigem JWT).
 - **Fly.io/Railway**: `fly launch` / *Deploy from repo* apontando para `apps/api`.
 
@@ -42,7 +47,17 @@ Escala: um processo atende vários usuários; o motor usa asyncio com limites po
 
 **Vercel**: *Root Directory* `apps/web`, Framework *Vite*, build `npm run build`, saída `dist`. `vercel.json` já faz o fallback SPA. Variáveis: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_API_BASE_URL`, `VITE_SITE_URL`.
 
-**Cloudflare Pages**: *Root directory* `apps/web`, build `npm run build`, saída `dist` (fallback SPA nativo). Mesmas variáveis. Defina `NODE_VERSION=22`.
+**Cloudflare Pages (recomendado)**: dash.cloudflare.com → *Workers & Pages* → *Create* → *Pages* → *Connect to Git* → repositório. *Root directory* `apps/web`, *Framework preset* nenhum/Vite, build `npm run build`, saída `dist` (fallback SPA nativo). Variáveis de ambiente (Production):
+
+```
+NODE_VERSION=22
+VITE_API_BASE_URL=https://agentslab-api.onrender.com
+VITE_SUPABASE_URL=https://<ref>.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
+VITE_SITE_URL=https://<seu-projeto>.pages.dev
+```
+
+Depois, no Supabase → *Authentication → URL Configuration*: *Site URL* = endereço do Pages e, em *Redirect URLs*, `https://<seu-projeto>.pages.dev/**` (mantenha `http://localhost:5173/**` para desenvolver). Na primeira abertura do dia o app pode levar alguns segundos para conectar (servidor acordando).
 
 Nada secreto vai para o frontend: só a URL do Supabase, a chave **publicável** e a URL pública da API.
 

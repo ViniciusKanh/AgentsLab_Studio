@@ -64,10 +64,16 @@ async def lifespan(_app: FastAPI):
     from app.services.orchestrator import orchestrator
 
     orchestrator.recover()
+    import asyncio
+
+    from app.services.keepalive import keepalive_loop
+
+    ka = asyncio.create_task(keepalive_loop(lambda: bool(orchestrator.runners)))
     yield
+    ka.cancel()
 
 
-app = FastAPI(title="AgentsLab_Studio API", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="AgentsLab_Studio API", version="0.4.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],

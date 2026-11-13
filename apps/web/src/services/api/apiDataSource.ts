@@ -8,6 +8,8 @@ export async function errorText(res: Response): Promise<string> {
   const raw = await res.text()
   try {
     const d = (JSON.parse(raw) as { detail?: unknown }).detail
+    // rota inexistente no servidor (não é "registro não encontrado"): backend antigo em execução
+    if (d === 'Not Found') return 'O servidor (backend) em execução não tem esta função — ele está desatualizado. Pare o uvicorn (Ctrl+C) e inicie de novo para carregar o código novo.'
     if (typeof d === 'string') return d
     if (Array.isArray(d)) return d.map((x: { msg?: string }) => x.msg).join('; ')
   } catch { /* texto puro */ }

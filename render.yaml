@@ -1,0 +1,35 @@
+# Render Blueprint — backend do AgentsLab_Studio no plano gratuito.
+# Render → New → Blueprint → escolha este repositório. Os valores com "sync: false"
+# são pedidos na criação e ficam guardados como segredos no Render (nunca no repositório).
+services:
+  - type: web
+    name: agentslab-api
+    runtime: docker
+    plan: free
+    region: oregon            # mesma região do Supabase (us-west-2) = menor latência
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: ./apps/api
+    buildFilter:              # só republica quando o backend muda (ignora docs/media, frontend…)
+      paths:
+        - apps/api/**
+      ignoredPaths:
+        - apps/api/tests/**
+    healthCheckPath: /health
+    autoDeploy: true          # publica a cada push na main
+    envVars:
+      - key: AGENTSLAB_ENV
+        value: production
+      - key: AGENTSLAB_SECRET_BACKEND
+        value: db
+      # mantém o servidor acordado (o Render free hiberna após ~15 min sem acesso)
+      - key: AGENTSLAB_KEEPALIVE_MODE
+        value: always
+      # Segredos (preencha no painel do Render)
+      - key: AGENTSLAB_DATABASE_URL     # Supabase → Connect → Session pooler (porta 5432)
+        sync: false
+      - key: AGENTSLAB_SUPABASE_URL     # https://<ref>.supabase.co
+        sync: false
+      - key: AGENTSLAB_MASTER_KEY       # a MESMA do seu apps/api/.env (senão as chaves salvas não abrem)
+        sync: false
+      - key: AGENTSLAB_CORS_ORIGINS     # endereço do Cloudflare Pages, ex.: https://agentslab-studio.pages.dev
+        sync: false

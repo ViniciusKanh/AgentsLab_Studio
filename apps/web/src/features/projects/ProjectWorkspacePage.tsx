@@ -54,7 +54,7 @@ export default function ProjectWorkspacePage() {
   const load = useCallback(async () => {
     try {
       const [p, m, a, e, x, tc] = await Promise.all([platform.project(projectId), platform.messages(projectId), platform.artifacts(projectId), platform.evidence(projectId),
-        platform.executions(projectId), platform.toolCalls(projectId)])
+        platform.executions(projectId), platform.toolCalls(projectId).catch(() => [])])
       setProject(p); setMessages(m); setArtifacts(a); setEvidence(e); setExecutions(x); setToolCalls(tc); setError('')
     } catch (err) {
       setError((err as Error).message)

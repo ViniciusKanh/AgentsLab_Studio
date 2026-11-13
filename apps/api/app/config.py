@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     max_total_tasks_per_project: int = 30
     # verificação independente de referências (Crossref / arXiv)
     verify_references: bool = True
+    # Hospedagem gratuita que hiberna (Render free): o servidor acessa o próprio endereço público.
+    # URL vazia usa RENDER_EXTERNAL_URL (o Render define sozinho). Modo: always | busy | off
+    keepalive_url: str = ""
+    keepalive_mode: str = "always"
+    keepalive_interval_sec: int = 300
     seed_demo_organizations: bool = True
     # Autenticação (Supabase Auth). Sem supabase_url/jwt_secret → modo local de usuário único (desktop).
     supabase_url: str = ""

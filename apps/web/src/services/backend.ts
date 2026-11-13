@@ -29,7 +29,9 @@ export const useBackendStore = create<BackendState>()(
         set({ status: 'checking' })
         try {
           const ctrl = new AbortController()
-          const t = setTimeout(() => ctrl.abort(), 3500)
+          // servidor remoto gratuito pode estar acordando (Render): espera mais que o local
+          const local = /localhost|127\.0\.0\.1/.test(get().baseUrl)
+          const t = setTimeout(() => ctrl.abort(), local ? 3500 : 15000)
           const res = await fetch(`${get().baseUrl}/health`, { signal: ctrl.signal })
           clearTimeout(t)
           if (!res.ok) throw new Error(`HTTP ${res.status}`)
