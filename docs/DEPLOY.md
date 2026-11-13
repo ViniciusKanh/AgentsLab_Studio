@@ -47,7 +47,9 @@ Escala: um processo atende vários usuários; o motor usa asyncio com limites po
 
 **Vercel**: *Root Directory* `apps/web`, Framework *Vite*, build `npm run build`, saída `dist`. `vercel.json` já faz o fallback SPA. Variáveis: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_API_BASE_URL`, `VITE_SITE_URL`.
 
-**Cloudflare Pages (recomendado)**: dash.cloudflare.com → *Workers & Pages* → *Create* → *Pages* → *Connect to Git* → repositório. *Root directory* `apps/web`, *Framework preset* nenhum/Vite, build `npm run build`, saída `dist` (fallback SPA nativo). Variáveis de ambiente (Production):
+**Cloudflare Workers (fluxo atual do painel — usado em produção)**: *Workers & Pages → Create → Import a repository* → `AgentsLab_Studio`. Build command `npm run build`, deploy command `npx wrangler deploy`, *Advanced settings → Root directory* `apps/web`. O arquivo `apps/web/wrangler.jsonc` publica a pasta `dist` com fallback de SPA. As variáveis `VITE_*` (abaixo) vão em **Settings → Build → Variables and secrets** (são lidas no build; depois de alterar, refaça o deploy). Endereço: `https://agentslab-studio.<conta>.workers.dev`.
+
+**Cloudflare Pages (alternativa)**: dash.cloudflare.com → *Workers & Pages* → *Create* → *Pages* → *Connect to Git* → repositório. *Root directory* `apps/web`, *Framework preset* nenhum/Vite, build `npm run build`, saída `dist` (fallback SPA nativo). Variáveis de ambiente (Production):
 
 ```
 NODE_VERSION=22

@@ -5,8 +5,9 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
     AGENTSLAB_SECRET_BACKEND=db AGENTSLAB_DATA_DIR=/tmp/agentslab PORT=8000
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements.lock.txt ./
+# versões fixadas pelo lock (reprodutibilidade)
+RUN pip install --no-cache-dir -r requirements.txt -c requirements.lock.txt
 COPY app ./app
 RUN useradd -m appuser
 USER appuser

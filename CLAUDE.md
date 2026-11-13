@@ -9,7 +9,7 @@ O AgentsLab_Studio é uma **plataforma real de organizações multiagentes com v
 3. **Nada simulado como real.** Sem backend o app fica em modo offline (agentes de exemplo, somente visualização, selo EXEMPLO/OFFLINE). Telas que dependem de execução mostram `OfflineNotice`.
 4. Camada ambiental (`world/ambient`) nunca consome tokens e **nunca afirma progresso de trabalho** (há teste para isso). Texto profissional nos balões = mensagem real (`agent:message`).
 5. Progresso de tarefas = etapas reais informadas pelo backend (`stepsDone/stepsTotal`), nunca porcentagens inventadas.
-6. **Segurança:** chaves de API só no backend (cofre do SO via `keyring`; fallback Fernet). Nunca em `localStorage`, `VITE_*` ou no repositório. Conteúdo externo entra nos prompts delimitado como dado não confiável.
+6. **Segurança:** chaves de API só no backend (padrão: Fernet no PostgreSQL com `AGENTSLAB_MASTER_KEY`; `keyring` opcional no desktop). Nunca em `localStorage`, `VITE_*` ou no repositório. Conteúdo externo entra nos prompts delimitado como dado não confiável.
 7. **Referências:** só evidências registradas pelas ferramentas; a seção de referências é gerada pelo sistema (`with_references`); citações inexistentes são apontadas na revisão.
 8. **Custos/loops:** respeitar orçamento por projeto, limite de chamadas, de tarefas e de revisões automáticas (`app/config.py`).
 9. Operações sensíveis (pagamentos, lançamentos, declarações) exigem integração configurada e aprovação humana — não presumir acesso.
@@ -24,6 +24,7 @@ O AgentsLab_Studio é uma **plataforma real de organizações multiagentes com v
 18. Nova tabela no backend: incluir `owner_id` (ou herdar do pai), atualizar `supabase/migrations/*_agentslab_security.sql` e `_NEW_COLUMNS` em `app/main.py` para bancos existentes.
 20. Banco = PostgreSQL (Supabase/Docker). SQLite só em testes (`AGENTSLAB_ALLOW_SQLITE=1`). Nunca guardar senhas/e-mails de pessoas em arquivos do repositório.
 19. Chamadas ao backend sempre via `services/http.ts` (`apiFetch`) — inclui o token. Telas novas precisam funcionar em 390 px de largura.
+21. **Reprodutibilidade:** Node 22 e Python 3.12; dependências por `package-lock.json` (`npm ci`) e `requirements.lock.txt` (restrições). Ao mudar dependências, regerar o lock e rodar as três suítes (pytest, Vitest, Playwright).
 
 ## Verificação antes de concluir
 ```

@@ -151,10 +151,10 @@ try {
   await record('/laboratorio', 'demo-laboratorio', 16, async () => {
     await jpost(`${API}/api/v1/projects/${pid}/plan/decision`, { approve: true }, AUTHZ)
   })
-  await shot(`/projetos/${pid}`, 'projeto-entrega', 8000, async (p) => {
-    await p.getByRole('tab', { name: /Documentos/ }).click()
-    await p.waitForTimeout(800)
-  })
+  await shot(`/projetos/${pid}?area=revisao`, 'projeto-revisao', 8000)
+  await shot(`/projetos/${pid}?area=execucao`, 'projeto-execucao', 1500)
+  await shot(`/projetos/${pid}?area=documentos`, 'projeto-entrega', 1500)
+  await shot(`/projetos/${pid}?area=custos`, 'projeto-custos', 1500)
   await shot('/organizacoes', 'organizacoes', 1500)
   await shot('/agentes/novo', 'agent-studio', 1500)
   await shot('/provedores?tab=chaves', 'chaves-api', 1500)
