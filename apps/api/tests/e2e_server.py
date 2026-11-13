@@ -17,7 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "tests")]
 tmp = tempfile.mkdtemp(prefix="agentslab-e2e-")
 os.environ["AGENTSLAB_DATA_DIR"] = tmp
-os.environ["AGENTSLAB_DATABASE_URL"] = f"sqlite:///{tmp}/e2e.db"
+os.environ["AGENTSLAB_DATABASE_URL"] = os.environ.get("E2E_DATABASE_URL", f"sqlite:///{tmp}/e2e.db")
+os.environ["AGENTSLAB_ALLOW_SQLITE"] = "1"  # somente testes
 os.environ.setdefault("AGENTSLAB_CORS_ORIGINS", "http://localhost:4173,http://127.0.0.1:4173,http://localhost:5173")
 # autenticação: com FAKE_SUPABASE_SECRET, valida os JWT do Supabase falso (tests/fake_supabase.py);
 # sem ela, roda no modo local de usuário único
@@ -29,6 +30,10 @@ import uvicorn  # noqa: E402
 from app.services import llm, tools, vault  # noqa: E402
 from fakes import FakeLLM, FakeTools  # noqa: E402
 
+# modelo padrão fixo do Gemini nos testes (no uso real vem de "Atualizar lista de modelos")
+from app.services.providers import CATALOG  # noqa: E402
+
+next(p for p in CATALOG if p["id"] == "gemini")["defaultModel"] = "gemini-teste"
 vault.set_store(vault.FernetFileStore(Path(tmp) / "secrets.enc", Fernet.generate_key().decode()))
 llm.set_gateway(FakeLLM(delay=float(os.environ.get("E2E_LLM_DELAY", "0.6"))))
 tools.set_tools(FakeTools())

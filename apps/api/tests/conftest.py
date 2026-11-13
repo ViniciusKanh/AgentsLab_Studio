@@ -6,6 +6,8 @@ import pytest
 from cryptography.fernet import Fernet
 
 os.environ.setdefault("AGENTSLAB_DATA_DIR", os.path.join(os.path.dirname(__file__), ".data"))
+os.environ.setdefault("AGENTSLAB_ALLOW_SQLITE", "1")  # SQLite só nos testes automatizados
+os.environ.setdefault("AGENTSLAB_SECRET_BACKEND", "file")
 
 from app import db  # noqa: E402
 from app.services import llm as llm_mod, tools as tools_mod, vault  # noqa: E402
@@ -28,6 +30,10 @@ def env(tmp_path):
 
     seed._seeded.clear()
     init_db()
+    # nos testes o "modelo padrão" do Gemini é fixo (no uso real vem de "Atualizar lista de modelos")
+    from app.services.providers import CATALOG
+
+    next(p for p in CATALOG if p["id"] == "gemini")["defaultModel"] = "gemini-teste"
     store = vault.FernetFileStore(tmp_path / "secrets.enc", Fernet.generate_key().decode())
     vault.set_store(store)
     fake = FakeLLM()

@@ -88,17 +88,23 @@ Sem `VITE_SUPABASE_*` o app roda em **modo local de usuário único** (desktop/d
 |---|---|
 | `AGENTSLAB_SUPABASE_URL` | liga a autenticação; valida o JWT pela JWKS pública (`/auth/v1/.well-known/jwks.json`, chaves assimétricas — padrão dos projetos novos) |
 | `AGENTSLAB_SUPABASE_JWT_SECRET` | só para projetos com **JWT secret legado (HS256)** |
-| `AGENTSLAB_DATABASE_URL` | `postgresql+psycopg://postgres.<ref>:<senha>@aws-0-sa-east-1.pooler.supabase.com:5432/postgres?sslmode=require` |
-| `AGENTSLAB_SECRET_BACKEND=db` + `AGENTSLAB_MASTER_KEY` | chaves de API dos usuários criptografadas (Fernet) no banco |
+| `AGENTSLAB_DATABASE_URL` | **obrigatória** — `postgresql://postgres.<ref>:<senha>@aws-0-sa-east-1.pooler.supabase.com:5432/postgres?sslmode=require` (painel → *Connect* → *Session pooler*) |
+| `AGENTSLAB_MASTER_KEY` | **obrigatória** — chaves de API dos usuários criptografadas (Fernet) no banco (`AGENTSLAB_SECRET_BACKEND=auto`) |
 | `AGENTSLAB_CORS_ORIGINS` / `AGENTSLAB_CORS_ORIGIN_REGEX` | domínios do frontend (ex.: regex `https://.*\.vercel\.app`) |
 
 O backend recusa tokens expirados, com assinatura inválida, com `aud` diferente de `authenticated` ou com `role` diferente de `authenticated`. O SSE (`/api/v1/events`) aceita o token também em `?access_token=` porque o `EventSource` não envia cabeçalhos.
 
-## 5. Isolamento entre usuários
+## 5. Conta principal e papéis
+- `apps/api/scripts/criar_conta_principal.py` cria (ou promove) a conta **já confirmada** com `app_metadata.role = "owner"` usando a **service_role** pela API administrativa do Supabase. Somente a service_role altera `app_metadata` — um usuário comum não consegue se promover.
+- `--assumir-dados-locais` transfere para essa conta o que foi criado no modo local (organizações, agentes, projetos, chaves, preferências).
+- A senha é digitada no terminal; nada é gravado em arquivo. Senhas fracas (ex.: só números) geram aviso — troque em **Configurações → Conta → Trocar senha** (exige a senha atual).
+- O backend lê o papel do JWT (`CurrentUser.role`); a interface mostra “Conta principal”.
+
+## 6. Isolamento entre usuários
 - Toda entidade raiz tem `owner_id`; rotas buscam o recurso e respondem **404** se pertencer a outro usuário (organizações, agentes, projetos, mensagens, documentos, evidências, execuções, chaves, preferências de provedor, workflows, eventos SSE).
 - Cada usuário recebe suas próprias organizações iniciais no primeiro acesso.
 - Chaves de API: uma pessoa nunca usa a chave de outra; variáveis de ambiente (`GEMINI_API_KEY` etc.) só valem no modo local.
 - Testes: `apps/api/tests/test_auth.py` (tokens inválidos/expirados, dados cruzados entre dois usuários, semente concorrente).
 
-## 6. Testes sem rede
+## 7. Testes sem rede
 `apps/api/tests/fake_supabase.py` implementa o subconjunto da API do Supabase Auth usado pelo app (cadastro, e-mails com `token_hash`, verificação, login, refresh, recuperação, atualização de senha, logout). Os E2E (`apps/web/e2e/auth.spec.ts`) rodam o `supabase-js` real do app contra ele. **Não substitui** um teste com o seu projeto Supabase real — faça-o após configurar (passo a passo no README).

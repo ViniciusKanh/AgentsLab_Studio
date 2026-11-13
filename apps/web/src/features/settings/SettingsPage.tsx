@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { KeyRound, LogOut, Plug, RotateCcw, Save, Settings, ShieldCheck, UserRound } from 'lucide-react'
-import { Link } from 'react-router-dom'
-import { displayName, useAuthStore } from '@/stores/authStore'
+import { displayName, isOwner, useAuthStore } from '@/stores/authStore'
+import { PasswordStrength, passwordOk } from '@/features/auth/AuthLayout'
 import { appConfig } from '@/services/config'
 import { useBackendStore } from '@/services/backend'
 import { platform } from '@/services/platform'
@@ -95,18 +95,56 @@ function AccountPanel() {
   return (
     <Panel accent="purple" title="Conta" data-testid="account-panel">
       <div className="space-y-2 text-[12px]">
-        <p className="flex items-center gap-2"><UserRound size={15} className="text-neon-purple" /> {user?.email}{user?.email_confirmed_at && <Chip color="#00f5a0">e-mail confirmado</Chip>}</p>
+        <p className="flex flex-wrap items-center gap-2"><UserRound size={15} className="text-neon-purple" /> {user?.email}{user?.email_confirmed_at && <Chip color="#00f5a0">e-mail confirmado</Chip>}{isOwner(user) && <Chip color="#ffb800">conta principal</Chip>}</p>
         <Field label="Nome completo">
           <div className="flex gap-1.5">
             <input className="px-input" value={name} onChange={(e) => setName(e.target.value)} />
             <button className="px-btn sm" disabled={name.trim().length < 3} onClick={() => void updateProfile(name).then((e) => toast(e ?? 'Perfil atualizado', e ? 'error' : 'success'))}><Save size={13} /> Salvar</button>
           </div>
         </Field>
-        <div className="flex flex-wrap gap-1.5">
-          <Link to="/redefinir-senha" className="px-btn sm ghost"><KeyRound size={13} /> Alterar senha</Link>
+        <ChangePassword />
+        <div className="flex flex-wrap gap-1.5 border-t border-white/5 pt-2">
           <button className="px-btn sm" style={{ ['--c' as string]: '#ff537a' }} onClick={() => void signOut()} data-testid="settings-logout"><LogOut size={13} /> Sair</button>
         </div>
       </div>
     </Panel>
+  )
+}
+
+function ChangePassword() {
+  const changePassword = useAuthStore((s) => s.changePassword)
+  const toast = useUiStore((s) => s.toast)
+  const [f, setF] = useState({ current: '', next: '', confirm: '' })
+  const [err, setErr] = useState<Record<string, string>>({})
+  const [busy, setBusy] = useState(false)
+  const submit = async () => {
+    const e: Record<string, string> = {}
+    if (!f.current) e.current = 'Informe a senha atual.'
+    if (!passwordOk(f.next)) e.next = 'A nova senha não atende aos requisitos.'
+    if (f.confirm !== f.next) e.confirm = 'As senhas não conferem.'
+    setErr(e)
+    if (Object.keys(e).length) return
+    setBusy(true)
+    const r = await changePassword(f.current, f.next)
+    setBusy(false)
+    if (r) {
+      setErr(r.includes('atual') ? { current: r } : { form: r })
+      return
+    }
+    setF({ current: '', next: '', confirm: '' })
+    toast('Senha alterada com sucesso', 'success')
+  }
+  return (
+    <form className="space-y-2 border-t border-white/5 pt-2" onSubmit={(e) => { e.preventDefault(); void submit() }} data-testid="change-password">
+      <p className="flex items-center gap-1.5 font-extrabold"><KeyRound size={14} className="text-neon-gold" /> Trocar senha</p>
+      <Field label="Senha atual" error={err.current}><input type="password" autoComplete="current-password" className="px-input" value={f.current} onChange={(e) => setF({ ...f, current: e.target.value })} data-testid="pw-current" /></Field>
+      <Field label="Nova senha" error={err.next}>
+        <input type="password" autoComplete="new-password" className="px-input" value={f.next} onChange={(e) => setF({ ...f, next: e.target.value })} data-testid="pw-new" />
+        {f.next && <PasswordStrength value={f.next} />}
+      </Field>
+      <Field label="Confirmar nova senha" error={err.confirm}><input type="password" autoComplete="new-password" className="px-input" value={f.confirm} onChange={(e) => setF({ ...f, confirm: e.target.value })} data-testid="pw-confirm" /></Field>
+      {err.form && <p className="text-[11px] text-neon-pink" role="alert">{err.form}</p>}
+      <button className="px-btn sm solid" disabled={busy} data-testid="pw-submit"><KeyRound size={13} /> {busy ? 'Salvando…' : 'Salvar nova senha'}</button>
+    </form>
   )
 }

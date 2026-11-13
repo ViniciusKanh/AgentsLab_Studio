@@ -81,7 +81,7 @@ async def events(request: Request, after: int | None = None, projectId: str | No
 
 @router.get("/me")
 def me(u: CurrentUser = Depends(user)):
-    return {"id": u.id, "email": u.email, "name": u.name}
+    return {"id": u.id, "email": u.email, "name": u.name, "role": u.role}
 
 
 # ------------------------------------------------------------------ provedores
@@ -160,7 +160,7 @@ async def refresh_models(pid: str, db: Session = Depends(get_db), u: CurrentUser
         if not key:
             raise HTTPException(422, "Cadastre uma chave deste provedor para listar os modelos.")
     try:
-        models = await list_remote_models(pid, key)
+        models, dropped = await list_remote_models(pid, key)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:  # rede/credencial
@@ -169,13 +169,23 @@ async def refresh_models(pid: str, db: Session = Depends(get_db), u: CurrentUser
         raise HTTPException(502, "O provedor não retornou modelos de texto para esta chave.")
     prefs = get_prefs(db, u.id)
     cur = dict(prefs.get(pid, {}))
+    valid = {m["id"] for m in models}
     cur["models"] = models
     cur["modelsSyncedAt"] = datetime.now(timezone.utc).isoformat()
-    if cur.get("defaultModel") not in {m["id"] for m in models}:
+    if cur.get("defaultModel") not in valid:
         cur["defaultModel"] = models[0]["id"]
     prefs[pid] = cur
     save_prefs(db, u.id, prefs)
-    return next(p for p in _providers(db, u.id) if p["id"] == pid)
+    # agentes presos a um modelo que não funciona voltam ao modelo padrão do provedor
+    reset = 0
+    for a in db.scalars(select(Agent).where(Agent.owner_id == u.id)):
+        intel = dict((a.config or {}).get("intelligence") or {})
+        if intel.get("provider") == pid and intel.get("model") and intel["model"] not in valid:
+            intel["model"] = ""
+            a.config = {**(a.config or {}), "intelligence": intel}
+            reset += 1
+    db.commit()
+    return {**next(p for p in _providers(db, u.id) if p["id"] == pid), "removedModels": dropped, "agentsReset": reset}
 
 
 # ------------------------------------------------------------------ consumo e visão geral

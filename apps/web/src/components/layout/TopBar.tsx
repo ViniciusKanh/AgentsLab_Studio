@@ -5,7 +5,7 @@ import { LogoEmblem } from '../brand/Logo'
 import { Avatar, cx } from '../ui/primitives'
 import { useLabStore } from '@/stores/labStore'
 import { useBackendStore } from '@/services/backend'
-import { displayName, useAuthStore } from '@/stores/authStore'
+import { displayName, isOwner, useAuthStore } from '@/stores/authStore'
 import { useUiStore } from '@/stores/uiStore'
 import { useSimulationStore } from '@/stores/simulationStore'
 import { useWorldStore } from '@/stores/worldStore'
@@ -77,7 +77,7 @@ export function TopBar() {
         <div className="relative">
           <button className="flex items-center gap-2 rounded-[6px] py-1 pl-1 pr-2 hover:bg-white/10" onClick={() => setProfileOpen(!profileOpen)} aria-label="Perfil">
             <Avatar characterId="vinicius" size={28} ring="#9d62ff" />
-            <span className="hidden text-left leading-tight lg:block"><b className="block max-w-[160px] truncate text-[11.5px]" data-testid="user-name">{name}</b><span className="text-[10px] text-lab-muted">Gestor</span></span>
+            <span className="hidden text-left leading-tight lg:block"><b className="block max-w-[160px] truncate text-[11.5px]" data-testid="user-name">{name}</b><span className="text-[10px] text-lab-muted">{authOn && isOwner(user) ? 'Conta principal' : 'Gestor'}</span></span>
           </button>
           {profileOpen && <button className="fixed inset-0 z-0 cursor-default" aria-label="Fechar menu do perfil" onClick={() => setProfileOpen(false)} />}
           {profileOpen && (

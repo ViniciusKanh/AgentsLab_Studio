@@ -142,9 +142,14 @@ _store: SecretStore | None = None
 def get_store() -> SecretStore:
     global _store
     if _store is None:
-        if settings.secret_backend == "db":
+        backend = settings.secret_backend
+        if backend == "auto":
+            from app.db import engine
+
+            backend = "db" if engine.dialect.name == "postgresql" else "keyring"
+        if backend == "db":
             _store = DbFernetStore(settings.master_key or os.environ.get("AGENTSLAB_MASTER_KEY", ""))
-        elif settings.secret_backend == "keyring":
+        elif backend == "keyring":
             try:
                 _store = KeyringStore()
             except Exception:

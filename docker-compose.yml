@@ -1,0 +1,28 @@
+# Desenvolvimento local com PostgreSQL (sem SQLite). Produção: Supabase PostgreSQL (docs/DEPLOY.md).
+#   docker compose up -d db          → só o banco (rode a API com uvicorn apontando para ele)
+#   docker compose up -d             → banco + API em http://localhost:8000
+# Variáveis da API: crie apps/api/.env (AGENTSLAB_MASTER_KEY, AGENTSLAB_SUPABASE_URL...).
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: agentslab
+      POSTGRES_PASSWORD: agentslab
+      POSTGRES_DB: agentslab
+    ports: ["5432:5432"]
+    volumes: [agentslab-pg:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentslab"]
+      interval: 5s
+      retries: 10
+  api:
+    build: ./apps/api
+    env_file: [./apps/api/.env]
+    environment:
+      AGENTSLAB_DATABASE_URL: postgresql+psycopg://agentslab:agentslab@db:5432/agentslab
+      AGENTSLAB_CORS_ORIGINS: http://localhost:5173,http://localhost:4173
+    ports: ["8000:8000"]
+    depends_on:
+      db: { condition: service_healthy }
+volumes:
+  agentslab-pg:

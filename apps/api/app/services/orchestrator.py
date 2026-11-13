@@ -20,7 +20,7 @@ from app.db import session_scope
 from app.models import Agent, AgentMessage, Approval, Artifact, ArtifactVersion, Evidence, Execution, Project, Task
 from app.services import prompts as P
 from app.services.events import hub
-from app.services.llm import LLMError, get_gateway, parse_json
+from app.services.llm import LLMError, MissingCredential, get_gateway, parse_json
 from app.services.tools import get_tools
 from app.services.providers import resolve_model
 from app.services.vault import CredentialService
@@ -106,8 +106,6 @@ class Orchestrator:
         owner = agent.owner_id
         with session_scope() as s:
             model, enabled = resolve_model(s, owner, provider, intel.get("model"))
-        if not enabled:
-            raise LLMError(f"O provedor {provider} está desativado em Provedores e Custos. Ative-o ou troque o modelo do agente ({agent.name}).")
         if project_id:
             with session_scope() as s:
                 p = s.get(Project, project_id)
@@ -118,6 +116,12 @@ class Orchestrator:
         with session_scope() as s:
             key = CredentialService(s, owner_id=owner).resolve(provider, intel.get("credentialId"))
         try:
+            if not enabled:
+                raise LLMError(f"O provedor {provider} está desativado em Provedores e Custos. Ative-o ou troque o modelo do agente ({agent.name}).")
+            if provider != "ollama" and not key:
+                raise MissingCredential(f"Nenhuma chave configurada para {provider}. Cadastre em Provedores e Custos → Chaves.")
+            if not model:
+                raise LLMError(f"Nenhum modelo definido para {provider}. Abra Provedores e Custos → Atualizar lista de modelos e salve um modelo padrão.")
             r = await get_gateway().complete(provider=provider, model=model, api_key=key, messages=messages, temperature=float(intel.get("temperature", 0.3)),
                                              max_tokens=int(max_tokens or intel.get("maxOutputTokens", 2048)), json_mode=json_mode, purpose=purpose)
         except LLMError as exc:

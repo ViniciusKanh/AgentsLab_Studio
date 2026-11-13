@@ -21,6 +21,8 @@ interface AuthState {
   updatePassword: (password: string) => Promise<string | null>
   confirmFromEmail: (tokenHash: string, type: 'signup' | 'email' | 'recovery' | 'invite' | 'magiclink' | 'email_change') => Promise<string | null>
   updateProfile: (fullName: string) => Promise<string | null>
+  /** troca de senha autenticada: confirma a senha atual antes de definir a nova */
+  changePassword: (current: string, next: string) => Promise<string | null>
   signOut: () => Promise<void>
 }
 
@@ -87,6 +89,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const { error } = await supabase.auth.updateUser({ data: { full_name: fullName.trim() } })
     return error ? authErrorMessage(error) : null
   },
+  async changePassword(current, next) {
+    if (!supabase) return 'Autenticação não configurada.'
+    const email = get().user?.email
+    if (!email) return 'Sessão expirada. Entre novamente.'
+    if (current === next) return 'A nova senha precisa ser diferente da atual.'
+    // reautenticação: só quem sabe a senha atual consegue trocá-la (sessão esquecida aberta não basta)
+    const re = await supabase.auth.signInWithPassword({ email, password: current })
+    if (re.error) return re.error.code === 'invalid_credentials' || /invalid login/i.test(re.error.message) ? 'Senha atual incorreta.' : authErrorMessage(re.error)
+    const { error } = await supabase.auth.updateUser({ password: next })
+    return error ? authErrorMessage(error) : null
+  },
   async signOut() {
     if (supabase) await supabase.auth.signOut()
     set({ session: null, user: null, recovery: false })
@@ -101,3 +114,6 @@ export async function accessToken(): Promise<string | null> {
 }
 
 export const displayName = (u: User | null) => (u?.user_metadata?.full_name as string | undefined) || u?.email?.split('@')[0] || 'Usuário'
+
+/** Conta principal (definida pela service_role em app_metadata.role — o usuário não consegue se promover). */
+export const isOwner = (u: User | null) => (u?.app_metadata as { role?: string } | undefined)?.role === 'owner'

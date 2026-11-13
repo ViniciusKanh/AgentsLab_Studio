@@ -14,9 +14,11 @@ class Settings(BaseSettings):
     database_url: str = ""
     # PostgreSQL: schema próprio, FORA do "public" exposto pela Data API do Supabase
     db_schema: str = "agentslab"
-    # Cofre de segredos: "keyring" (Gerenciador de Credenciais do Windows/Keychain), "file" (arquivo Fernet)
-    # ou "db" (Fernet no banco — servidor hospedado, disco efêmero). "file"/"db" exigem master_key.
-    secret_backend: str = "keyring"
+    # SQLite só para testes automatizados / demonstração explícita. Uso normal: PostgreSQL (Supabase ou Docker).
+    allow_sqlite: bool = False
+    # Cofre de segredos: "auto" (= "db" com PostgreSQL), "db" (Fernet no banco — funciona local e no servidor),
+    # "keyring" (Gerenciador de Credenciais do Windows) ou "file" (arquivo Fernet). "db"/"file" exigem master_key.
+    secret_backend: str = "auto"
     # Usado apenas pelo backend "file" (CI/servidores sem cofre do SO)
     master_key: str = ""
     ollama_base_url: str = "http://localhost:11434"
@@ -37,8 +39,27 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
+class ConfigError(RuntimeError):
+    pass
+
+
 def db_url() -> str:
-    return settings.database_url or f"sqlite:///{settings.data_dir}/agentslab.db"
+    url = settings.database_url.strip()
+    if url.startswith("postgres://"):
+        url = "postgresql+psycopg://" + url[len("postgres://"):]
+    elif url.startswith("postgresql://"):
+        url = "postgresql+psycopg://" + url[len("postgresql://"):]
+    if url:
+        if url.startswith("sqlite") and not settings.allow_sqlite:
+            raise ConfigError("SQLite está desativado. Use PostgreSQL em AGENTSLAB_DATABASE_URL (veja docs/DEPLOY.md).")
+        return url
+    if settings.allow_sqlite:
+        return f"sqlite:///{settings.data_dir}/agentslab.db"
+    raise ConfigError(
+        "Banco não configurado. Defina AGENTSLAB_DATABASE_URL com um PostgreSQL — Supabase "
+        "(postgresql://postgres.<ref>:<senha>@aws-0-<regiao>.pooler.supabase.com:5432/postgres?sslmode=require) "
+        "ou o Docker local (docker compose up -d db → postgresql://agentslab:agentslab@localhost:5432/agentslab). Veja docs/DEPLOY.md."
+    )
 
 
 def auth_enabled() -> bool:

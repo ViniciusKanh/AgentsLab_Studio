@@ -40,29 +40,27 @@
 2. **Provedores e Custos → Chaves (API) → Novo perfil**: provedor, apelido e a chave.
 3. **Agent Studio → Inteligência → Chave de API**: escolha o perfil de cada agente (ou deixe o padrão do provedor, marcado com ★).
 
-A chave sai do navegador uma única vez para o backend local, que a guarda no **cofre do sistema** via `keyring` (Windows: Gerenciador de Credenciais/DPAPI; macOS: Keychain; Linux: Secret Service). O banco guarda só apelido e os 4 últimos dígitos; a API nunca devolve a chave. Sem cofre disponível (CI/servidor), use `AGENTSLAB_SECRET_BACKEND=file` + `AGENTSLAB_MASTER_KEY` (arquivo criptografado com Fernet).
+A chave sai do navegador uma única vez para o backend, que a guarda **criptografada (Fernet) no PostgreSQL** com a `AGENTSLAB_MASTER_KEY` — que existe só nas variáveis do servidor. A API nunca devolve a chave; o navegador só vê apelido e os 4 últimos dígitos. No app desktop sem servidor, o cofre pode ser o **Gerenciador de Credenciais do Windows** (`AGENTSLAB_SECRET_BACKEND=keyring`).
 
 **Microsoft Store (planejado):** empacotar com Tauri 2 (frontend) + backend Python como *sidecar* (PyInstaller) em MSIX — o mesmo modelo de chaves no cofre do Windows. Detalhes em [docs/PLANO_ADAPTACAO.md](docs/PLANO_ADAPTACAO.md).
 
-## Login (Supabase) — opcional no uso local
-
-Sem configurar o Supabase, o app roda em **modo local de usuário único** (sem login), como antes. Para ativar contas:
-1. Crie o projeto no Supabase e rode `supabase/migrations/20261113000001_profiles.sql` (passo a passo em [docs/SUPABASE.md](docs/SUPABASE.md)).
-2. `apps/web/.env`: `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY` (chave **publicável**).
-3. `apps/api/.env`: `AGENTSLAB_SUPABASE_URL` (mesma URL). Reinicie backend e frontend.
-
 ## Como executar (Windows / PowerShell)
 
-Backend (onde os agentes executam):
+O banco é **PostgreSQL** (SQLite e Turso não são usados — só nos testes automatizados). O caminho mais simples é usar o **Supabase**, que já fornece o banco e o login: crie o projeto seguindo [docs/SUPABASE.md](docs/SUPABASE.md). Alternativa local: `docker compose up -d db` (Docker Desktop).
+
+**1. Backend** — crie `apps/api/.env` a partir do `.env.example`:
 
 ```powershell
 cd C:\dev\AgentsLab_Studio\apps\api
+copy .env.example .env
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"   # cole em AGENTSLAB_MASTER_KEY
+# edite .env: AGENTSLAB_DATABASE_URL (Supabase → Connect → Session pooler) e AGENTSLAB_SUPABASE_URL
 python -m venv .venv; .venv\Scripts\activate
 pip install -r requirements.txt
 uvicorn app.main:app --port 8000
 ```
 
-Frontend (outro terminal):
+**2. Frontend** — `apps/web/.env` com `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY` (chave **publicável**):
 
 ```powershell
 cd C:\dev\AgentsLab_Studio\apps\web
@@ -70,7 +68,18 @@ npm install
 npm run dev          # http://localhost:5173
 ```
 
-O banco SQLite fica em `apps/api/data/agentslab.db` (PostgreSQL: `AGENTSLAB_DATABASE_URL`). Sem backend, o app abre em **modo offline** com agentes de exemplo apenas para visualização — nada é executado.
+**3. Conta principal** (uma vez) — cria sua conta já confirmada como dona da plataforma e, se quiser, traz os dados do modo local:
+
+```powershell
+cd C:\dev\AgentsLab_Studio\apps\api
+$env:SUPABASE_URL="https://<ref>.supabase.co"
+$env:SUPABASE_SERVICE_ROLE_KEY="<secret key do painel — nunca no frontend>"
+python scripts\criar_conta_principal.py --nome "Seu Nome" --email voce@exemplo.com --assumir-dados-locais
+```
+
+A senha é digitada no terminal (não fica em arquivo nem no histórico). Depois, troque-a quando quiser em **Configurações → Conta → Trocar senha**.
+
+**4. Chave do Gemini** — em **Provedores e Custos → Chaves**, cadastre a chave: o app testa cada modelo da sua conta Google e mostra **só os que funcionam**, escolhendo um padrão automaticamente. Projetos que falharam por modelo descontinuado: abra o projeto → **Reanalisar**.
 
 ### Primeiro projeto (teste obrigatório)
 
@@ -80,9 +89,9 @@ O banco SQLite fica em `apps/api/data/agentslab.db` (PostgreSQL: `AGENTSLAB_DATA
 
 | Comando | O que valida |
 |---|---|
-| `cd apps/api; pytest` | 18 testes (também passam sobre PostgreSQL com `AGENTSLAB_TEST_DATABASE_URL`): fluxo completo da aeronáutica (plano → edição → aprovação → dependências → evidências → consolidação → revisão automática → feedback → v3 + diff → aprovação → custos), JWT do Supabase e isolamento entre usuários, reanálise com troca de modelo, provedor desativado, cofre multi-chave, orçamento, cancelamento, chat, tarefa avulsa, CRUD |
+| `cd apps/api; pytest` | 22 testes (também passam sobre PostgreSQL com `AGENTSLAB_TEST_DATABASE_URL`): fluxo completo da aeronáutica (plano → edição → aprovação → dependências → evidências → consolidação → revisão automática → feedback → v3 + diff → aprovação → custos), JWT do Supabase e isolamento entre usuários, lista de modelos Gemini testados (descarta descontinuados), conta principal, banco obrigatório, reanálise com troca de modelo, provedor desativado, cofre multi-chave, orçamento, cancelamento, chat, tarefa avulsa, CRUD |
 | `cd apps/web; npm test` | Vitest: A\*, motor ambiental (entregas reais, ambientação sem falso progresso), eventos SSE → estados, stores, UI |
-| `npm run e2e` | Playwright (16): cadastro → verificação → login → sessão → recuperação de senha → logout contra um Supabase Auth falso local; projeto completo; reanalisar; salvar provedores; celular |
+| `npm run e2e` | Playwright (17): troca de senha, cadastro → verificação → login → sessão → recuperação de senha → logout contra um Supabase Auth falso local; projeto completo; reanalisar; salvar provedores; celular |
 | `npm run media` | gera prints, MP4 e GIF em `docs/media` |
 
 Os testes usam LLM, ferramentas e Supabase Auth **de teste** (`apps/api/tests/fakes.py`, `fake_supabase.py`), carregados somente nos testes.

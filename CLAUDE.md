@@ -22,6 +22,7 @@ O AgentsLab_Studio é uma **plataforma real de organizações multiagentes com v
 16. Compatibilidade com Windows; sem commits/push/deploy sem autorização.
 17. **Autenticação = Supabase Auth.** Nunca criar armazenamento de senhas/tokens próprio. Frontend só com a chave publicável; backend valida JWT (`app/auth.py`) e **toda** consulta filtra por `owner_id` (recurso de outro usuário → 404).
 18. Nova tabela no backend: incluir `owner_id` (ou herdar do pai), atualizar `supabase/migrations/*_agentslab_security.sql` e `_NEW_COLUMNS` em `app/main.py` para bancos existentes.
+20. Banco = PostgreSQL (Supabase/Docker). SQLite só em testes (`AGENTSLAB_ALLOW_SQLITE=1`). Nunca guardar senhas/e-mails de pessoas em arquivos do repositório.
 19. Chamadas ao backend sempre via `services/http.ts` (`apiFetch`) — inclui o token. Telas novas precisam funcionar em 390 px de largura.
 
 ## Verificação antes de concluir

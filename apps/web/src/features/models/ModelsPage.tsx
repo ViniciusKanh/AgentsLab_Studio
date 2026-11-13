@@ -139,7 +139,18 @@ function CredentialsTab() {
     if (alias.trim().length < 3) return
     if (!real) return
     const c = await createCredential({ provider, alias: alias.trim(), apiKey: apiKey.trim() })
-    if (c) { setAlias(''); setApiKey('') }
+    if (c) {
+      setAlias(''); setApiKey('')
+      if (['gemini', 'groq', 'openai'].includes(provider)) {
+        // descobre automaticamente os modelos que funcionam com a chave recém-cadastrada
+        useUiStore.getState().toast('Testando os modelos disponíveis para esta chave…', 'info')
+        platform.refreshModels(provider).then((p) => {
+          useLabStore.setState({ providers: useLabStore.getState().providers.map((x) => (x.id === p.id ? p : x)) })
+          useUiStore.getState().toast(`${p.name}: ${p.models.length} modelo(s) funcionando; padrão ${p.defaultModel}`, 'success')
+          if (p.agentsReset) void useLabStore.getState().load()
+        }).catch((e: Error) => useUiStore.getState().toast(`Não foi possível listar os modelos: ${e.message}`, 'warn'))
+      }
+    }
   }
   return (
     <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-[minmax(0,1fr)_380px]" data-testid="credentials-tab">
@@ -226,7 +237,9 @@ function ProvidersTab({ focus }: { focus: ProviderId | null }) {
     try {
       const p = await platform.refreshModels(id)
       useLabStore.setState({ providers: useLabStore.getState().providers.map((x) => (x.id === id ? p : x)) })
-      toast(`${p.models.length} modelos disponíveis em ${p.name}`, 'success')
+      const extra = [p.removedModels?.length ? `${p.removedModels.length} indisponível(is) ocultado(s)` : '', p.agentsReset ? `${p.agentsReset} agente(s) voltaram ao modelo padrão` : ''].filter(Boolean).join(' · ')
+      toast(`${p.models.length} modelo(s) funcionando em ${p.name}${extra ? ` — ${extra}` : ''}`, 'success')
+      if (p.agentsReset) void useLabStore.getState().load()
     } catch (err) {
       toast((err as Error).message, 'error')
     } finally {
@@ -277,7 +290,7 @@ function ProvidersTab({ focus }: { focus: ProviderId | null }) {
                   <RefreshCw size={12} className={busy === p.id ? 'animate-spin' : ''} /> {busy === p.id ? 'Consultando…' : 'Atualizar lista de modelos'}
                 </button>
               )}
-              <p className="text-[10px] text-lab-muted">{p.modelsSyncedAt ? `Lista sincronizada em ${new Date(p.modelsSyncedAt).toLocaleString('pt-BR')}` : 'Lista de referência — sincronize para ver os modelos da sua chave.'}</p>
+              <p className="text-[10px] text-lab-muted">{p.modelsSyncedAt ? `Só modelos testados com a sua chave · ${new Date(p.modelsSyncedAt).toLocaleString('pt-BR')}` : p.id === 'gemini' ? 'Clique em Atualizar: o app testa cada modelo com a sua chave e mostra só os que funcionam.' : 'Lista de referência — sincronize para ver os modelos da sua chave.'}</p>
               {real ? (
                 <p className="text-[10.5px] text-lab-muted">Últimos 30 dias: <b className="text-lab-text">{fmtCompact(p.usage.tokensMonth)}</b> tokens · <b className="text-lab-text">{fmtCost(p.usage.costUsdMonth)}</b> <span className="opacity-70">(estimativa)</span></p>
               ) : <p className="text-[10.5px] text-lab-muted">Consumo disponível com o backend conectado.</p>}

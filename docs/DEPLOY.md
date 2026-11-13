@@ -14,8 +14,8 @@
 
 Por que não colocar o backend na Vercel/Cloudflare? Os agentes executam por minutos, em segundo plano, e enviam eventos ao vivo (SSE). Funções serverless encerram em segundos e não mantêm conexões longas. O backend precisa de um **processo contínuo** (container).
 
-## 1. Supabase
-Siga `docs/SUPABASE.md` (projeto, migrations, Auth, URLs, SMTP).
+## 1. Banco e contas (Supabase)
+Siga `docs/SUPABASE.md` (projeto, migrations, Auth, URLs, SMTP). O banco é **sempre PostgreSQL**: o backend recusa iniciar sem `AGENTSLAB_DATABASE_URL` (SQLite fica restrito aos testes automatizados). Para desenvolver sem internet: `docker compose up -d db` (PostgreSQL 16 em `localhost:5432`).
 
 ## 2. Backend (container)
 
@@ -25,7 +25,6 @@ Imagem: `apps/api/Dockerfile` (Python 3.12, uvicorn, usuário sem privilégios).
 AGENTSLAB_ENV=production
 AGENTSLAB_DATABASE_URL=postgresql+psycopg://postgres.<ref>:<senha>@aws-0-sa-east-1.pooler.supabase.com:5432/postgres?sslmode=require
 AGENTSLAB_SUPABASE_URL=https://<ref>.supabase.co
-AGENTSLAB_SECRET_BACKEND=db
 AGENTSLAB_MASTER_KEY=<python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())">
 AGENTSLAB_CORS_ORIGINS=https://agentslab.vercel.app,https://agentslab-studio.pages.dev
 AGENTSLAB_CORS_ORIGIN_REGEX=https://.*\.vercel\.app|https://.*\.agentslab-studio\.pages\.dev

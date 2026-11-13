@@ -51,14 +51,15 @@ def hash_pw(pw: str, salt: str) -> str:
 
 def public_user(u: dict) -> dict:
     return {"id": u["id"], "aud": "authenticated", "role": "authenticated", "email": u["email"], "email_confirmed_at": u["confirmed_at"],
-            "confirmed_at": u["confirmed_at"], "user_metadata": u["meta"], "app_metadata": {"provider": "email", "providers": ["email"]},
+            "confirmed_at": u["confirmed_at"], "user_metadata": u["meta"], "app_metadata": {"provider": "email", "providers": ["email"], **u.get("app_meta", {})},
             "identities": [{"id": u["id"], "provider": "email", "identity_data": {"email": u["email"]}}], "created_at": u["created_at"], "updated_at": now_iso()}
 
 
 def session_for(u: dict) -> dict:
     exp = int(time.time()) + TOKEN_TTL
     access = jwt.encode({"sub": u["id"], "email": u["email"], "role": "authenticated", "aud": "authenticated", "exp": exp,
-                         "user_metadata": u["meta"], "session_id": str(uuid.uuid4())}, SECRET, algorithm="HS256")
+                         "user_metadata": u["meta"], "app_metadata": {"provider": "email", **u.get("app_meta", {})},
+                         "session_id": str(uuid.uuid4())}, SECRET, algorithm="HS256")
     rt = secrets.token_urlsafe(24)
     refresh[rt] = u["email"]
     return {"access_token": access, "token_type": "bearer", "expires_in": TOKEN_TTL, "expires_at": exp, "refresh_token": rt, "user": public_user(u)}
@@ -176,6 +177,55 @@ async def update_user(request: Request, authorization: str | None = Header(defau
 @app.post("/auth/v1/logout")
 async def logout():
     return Response(status_code=204)
+
+
+# ---- API administrativa (exige a service_role; usada só pelo script de conta principal) ----
+SERVICE_KEY = os.environ.get("FAKE_SUPABASE_SERVICE_KEY", "service-role-de-teste")
+
+
+def _admin_ok(authorization: str | None) -> bool:
+    return authorization == f"Bearer {SERVICE_KEY}"
+
+
+@app.post("/auth/v1/admin/users")
+async def admin_create(request: Request, authorization: str | None = Header(default=None)):
+    if not _admin_ok(authorization):
+        return err(401, "not_admin", "User not allowed")
+    b = await request.json()
+    email = str(b.get("email", "")).lower()
+    if email in users:
+        return err(422, "email_exists", "A user with this email address has already been registered")
+    salt = secrets.token_hex(8)
+    u = users[email] = {"id": str(uuid.uuid4()), "email": email, "salt": salt, "pw": hash_pw(str(b.get("password", "")), salt),
+                        "confirmed_at": now_iso() if b.get("email_confirm") else None, "meta": b.get("user_metadata") or {},
+                        "app_meta": b.get("app_metadata") or {}, "created_at": now_iso()}
+    return {**public_user(u), "app_metadata": {"provider": "email", **u["app_meta"]}}
+
+
+@app.get("/auth/v1/admin/users")
+async def admin_list(authorization: str | None = Header(default=None)):
+    if not _admin_ok(authorization):
+        return err(401, "not_admin", "User not allowed")
+    return {"users": [public_user(u) for u in users.values()]}
+
+
+@app.put("/auth/v1/admin/users/{uid}")
+async def admin_update(uid: str, request: Request, authorization: str | None = Header(default=None)):
+    if not _admin_ok(authorization):
+        return err(401, "not_admin", "User not allowed")
+    u = next((x for x in users.values() if x["id"] == uid), None)
+    if not u:
+        return err(404, "user_not_found", "User not found")
+    b = await request.json()
+    if "password" in b:
+        u["pw"] = hash_pw(str(b["password"]), u["salt"])
+    if b.get("email_confirm"):
+        u["confirmed_at"] = u["confirmed_at"] or now_iso()
+    if "user_metadata" in b:
+        u["meta"] = {**u["meta"], **(b["user_metadata"] or {})}
+    if "app_metadata" in b:
+        u["app_meta"] = {**u.get("app_meta", {}), **(b["app_metadata"] or {})}
+    return {**public_user(u), "app_metadata": {"provider": "email", **u.get("app_meta", {})}}
 
 
 @app.get("/__mail")

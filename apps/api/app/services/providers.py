@@ -4,6 +4,8 @@ e listagem AO VIVO dos modelos disponíveis para a chave do usuário.
 """
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 from sqlalchemy.orm import Session
 
@@ -14,8 +16,8 @@ from app.models import KeyValue
 CATALOG = [
     # O Google descontinua modelos com frequência (ex.: gemini-2.5-flash deixou de aceitar novos usuários).
     # Use "Atualizar lista" na tela de provedores: a lista real vem da API do Google com a sua chave.
-    {"id": "gemini", "name": "Gemini", "kind": "cloud", "badge": "Padrão", "defaultModel": "gemini-3.8-flash", "models": [
-        {"id": "gemini-3.8-flash", "name": "Gemini 3.8 Flash", "contextWindow": None, "inputPer1M": None, "outputPer1M": None, "priceIsEstimate": True, "tags": ["sugerido pela API do Google"]}]},
+    # Sem lista sincronizada não há como saber o que a chave aceita: a lista real vem de "Atualizar lista".
+    {"id": "gemini", "name": "Gemini", "kind": "cloud", "badge": "Padrão", "defaultModel": "", "models": []},
     {"id": "groq", "name": "Groq", "kind": "cloud", "badge": "Rápido", "defaultModel": "llama-3.3-70b-versatile", "models": [
         {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B", "contextWindow": 128_000, "inputPer1M": 0.59, "outputPer1M": 0.79, "priceIsEstimate": True, "tags": ["baixa latência"]},
         {"id": "llama-3.1-8b-instant", "name": "Llama 3.1 8B Instant", "contextWindow": 128_000, "inputPer1M": 0.05, "outputPer1M": 0.08, "priceIsEstimate": True, "tags": ["econômico"]}]},
@@ -67,20 +69,60 @@ def resolve_model(db: Session, owner: str, provider: str, model: str | None) -> 
     return (model or st["defaultModel"]), st["enabled"]
 
 
-async def list_remote_models(provider: str, api_key: str | None) -> list[dict]:
-    """Consulta a API do provedor e devolve os modelos de geração de texto disponíveis para a chave."""
-    async with httpx.AsyncClient(timeout=20) as c:
+# Modelos listados pela API que não servem para conversa/texto (imagem, áudio, embeddings etc.)
+_GEMINI_SKIP = ("embedding", "aqa", "imagen", "image", "tts", "audio", "live", "veo", "robotics", "computer-use", "learnlm", "nano-banana")
+_GONE = ("no longer available", "not found", "is not supported", "deprecated", "not available")
+
+
+def _gemini_candidate(m: dict) -> bool:
+    mid = str(m.get("name", "")).lower()
+    return "generateContent" in (m.get("supportedGenerationMethods") or []) and not any(k in mid for k in _GEMINI_SKIP)
+
+
+async def probe_gemini(c: httpx.AsyncClient, model_id: str, api_key: str) -> str:
+    """Chamada mínima ao modelo: 'ok', 'rate_limited' (existe, mas a cota acabou) ou 'unavailable'.
+    Necessário porque a listagem do Google inclui modelos que já não aceitam novos usuários (erro 404)."""
+    try:
+        r = await c.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent", params={"key": api_key},
+                         json={"contents": [{"role": "user", "parts": [{"text": "Responda apenas: ok"}]}], "generationConfig": {"maxOutputTokens": 16}})
+    except httpx.HTTPError:
+        return "error"
+    if r.status_code == 200:
+        return "ok"
+    if r.status_code == 429:
+        return "rate_limited"
+    msg = r.text.lower()
+    if r.status_code in (403, 404) or any(g in msg for g in _GONE):
+        return "unavailable"
+    return "error"
+
+
+async def list_remote_models(provider: str, api_key: str | None, transport: httpx.AsyncBaseTransport | None = None) -> tuple[list[dict], list[str]]:
+    """Modelos de texto que funcionam com a chave do usuário. Devolve (modelos válidos, ids descartados).
+    Gemini: lista + teste real de cada modelo (chamada mínima de poucos tokens)."""
+    async with httpx.AsyncClient(timeout=25, transport=transport) as c:
         if provider == "gemini":
             r = await c.get("https://generativelanguage.googleapis.com/v1beta/models", params={"key": api_key, "pageSize": 1000})
             r.raise_for_status()
-            out = []
-            for m in r.json().get("models", []):
-                if "generateContent" not in (m.get("supportedGenerationMethods") or []):
-                    continue
-                mid = str(m.get("name", "")).removeprefix("models/")
-                out.append({"id": mid, "name": m.get("displayName") or mid, "contextWindow": m.get("inputTokenLimit"),
-                            "inputPer1M": None, "outputPer1M": None, "priceIsEstimate": True, "tags": ["disponível na sua chave"]})
-            return out
+            cands = [m for m in r.json().get("models", []) if _gemini_candidate(m)]
+            sem = asyncio.Semaphore(6)
+
+            async def check(m):
+                async with sem:
+                    return m, await probe_gemini(c, str(m["name"]).removeprefix("models/"), api_key or "")
+
+            results = await asyncio.gather(*(check(m) for m in cands))
+            out, dropped = [], []
+            for m, st in results:
+                mid = str(m["name"]).removeprefix("models/")
+                if st in ("ok", "rate_limited"):
+                    out.append({"id": mid, "name": m.get("displayName") or mid, "contextWindow": m.get("inputTokenLimit"), "inputPer1M": None, "outputPer1M": None,
+                                "priceIsEstimate": True, "tags": ["testado com a sua chave"] if st == "ok" else ["cota esgotada no teste"]})
+                else:
+                    dropped.append(mid)
+            # preferência: modelos "flash" estáveis primeiro (mais baratos), depois o restante
+            out.sort(key=lambda x: (("preview" in x["id"]) or ("exp" in x["id"]), "flash" not in x["id"], x["id"]))
+            return out, dropped
         if provider in ("groq", "openai"):
             url = "https://api.groq.com/openai/v1/models" if provider == "groq" else "https://api.openai.com/v1/models"
             r = await c.get(url, headers={"Authorization": f"Bearer {api_key}"})
@@ -88,10 +130,12 @@ async def list_remote_models(provider: str, api_key: str | None) -> list[dict]:
             ids = sorted(m["id"] for m in r.json().get("data", []) if m.get("active", True))
             if provider == "openai":
                 ids = [i for i in ids if i.startswith(("gpt", "o1", "o3", "o4", "o5", "chatgpt"))]
-            return [{"id": i, "name": i, "contextWindow": None, "inputPer1M": None, "outputPer1M": None, "priceIsEstimate": True, "tags": ["disponível na sua chave"]} for i in ids]
+            if provider == "groq":
+                ids = [i for i in ids if not any(k in i for k in ("whisper", "tts", "guard", "playai"))]
+            return [{"id": i, "name": i, "contextWindow": None, "inputPer1M": None, "outputPer1M": None, "priceIsEstimate": True, "tags": ["disponível na sua chave"]} for i in ids], []
         if provider == "ollama":
             r = await c.get(f"{settings.ollama_base_url.rstrip('/')}/api/tags")
             r.raise_for_status()
             return [{"id": m["name"], "name": f"{m['name']} (local)", "contextWindow": None, "inputPer1M": 0, "outputPer1M": 0, "priceIsEstimate": False, "tags": ["local"]}
-                    for m in r.json().get("models", [])]
+                    for m in r.json().get("models", [])], []
     raise ValueError("Listagem automática não disponível para este provedor; informe o id do modelo manualmente.")

@@ -63,6 +63,11 @@ class LiteLLMGateway:
         try:
             resp = await litellm.acompletion(**kwargs)
         except Exception as exc:  # erros do provedor viram mensagens claras
+            low = str(exc).lower()
+            if "no longer available" in low or "notfounderror" in low or "not found" in low and "model" in low:
+                raise LLMError(f"O modelo {provider}/{model} não está disponível para a sua chave (descontinuado ou inexistente). "
+                               "Abra Provedores e Custos → Atualizar lista de modelos (mostra só os que funcionam) e depois use Reanalisar no projeto. "
+                               f"Detalhe: {str(exc)[:300]}") from exc
             raise LLMError(f"{provider}/{model}: {exc}") from exc
         latency = int((time.perf_counter() - t0) * 1000)
         text = resp.choices[0].message.content or ""

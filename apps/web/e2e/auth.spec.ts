@@ -124,6 +124,28 @@ test.describe('Autenticação', () => {
     await expect(page.getByTestId('auth-alert-error')).toContainText('inválido ou expirou')
   })
 
+  test('troca de senha em Configurações exige a senha atual', async ({ page, request }) => {
+    const email = `troca-${Date.now()}@teste.dev`
+    await request.post(`${AUTH}/auth/v1/signup`, { data: { email, password: PASSWORD, data: { full_name: 'Teste Troca' } } })
+    await page.goto(await lastMail(request, email, 'signup'))
+    await expect(page.getByTestId('topbar')).toBeVisible()
+    await page.goto('/configuracoes')
+    await page.getByTestId('pw-current').fill('SenhaErrada#9')
+    await page.getByTestId('pw-new').fill('OutraSenha#789')
+    await page.getByTestId('pw-confirm').fill('OutraSenha#789')
+    await page.getByTestId('pw-submit').click()
+    await expect(page.getByTestId('change-password')).toContainText('Senha atual incorreta')
+    await page.getByTestId('pw-current').fill(PASSWORD)
+    await page.getByTestId('pw-new').fill('fraca')
+    await page.getByTestId('pw-submit').click()
+    await expect(page.getByTestId('change-password')).toContainText('não atende aos requisitos')
+    await page.getByTestId('pw-new').fill('OutraSenha#789')
+    await page.getByTestId('pw-submit').click()
+    await expect(page.getByText('Senha alterada com sucesso')).toBeVisible()
+    await page.getByTestId('settings-logout').click()
+    await login(page, email, 'OutraSenha#789')
+  })
+
   test('responsivo: telas de login e cadastro no celular', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto('/entrar')

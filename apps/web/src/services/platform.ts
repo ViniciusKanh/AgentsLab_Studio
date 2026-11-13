@@ -52,7 +52,7 @@ export const platform = {
   reanalyze: (id: string, b: { provider?: string; model?: string; applyToTeam?: boolean; note?: string }) => post<Project & { agentsUpdated: number }>(`/projects/${id}/reanalyze`, b),
   retry: (id: string) => post<Project>(`/projects/${id}/retry`),
   saveProviders: (body: Record<string, { enabled?: boolean; defaultModel?: string; customModels?: string[] }>) => http<Provider[]>('/providers', { method: 'PUT', body: JSON.stringify(body) }),
-  refreshModels: (providerId: string) => post<Provider>(`/providers/${providerId}/models/refresh`),
+  refreshModels: (providerId: string) => post<Provider & { removedModels?: string[]; agentsReset?: number }>(`/providers/${providerId}/models/refresh`),
   evidence: (id: string) => http<Evidence[]>(`/projects/${id}/evidence`),
   executions: (id: string) => http<Execution[]>(`/projects/${id}/executions`),
 

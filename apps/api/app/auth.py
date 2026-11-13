@@ -26,6 +26,8 @@ class CurrentUser:
     id: str
     email: str = ""
     name: str = ""
+    # papel definido só pela service_role (app_metadata.role): "owner" = conta principal
+    role: str = "member"
 
 
 @lru_cache(maxsize=1)
@@ -53,12 +55,14 @@ def verify_token(token: str) -> CurrentUser:
     if claims.get("role") != "authenticated" or not claims.get("sub"):
         raise HTTPException(401, "Usuário não autenticado.")
     meta = claims.get("user_metadata") or {}
-    return CurrentUser(id=str(claims["sub"]), email=str(claims.get("email", "")), name=str(meta.get("full_name", "")))
+    app_meta = claims.get("app_metadata") or {}
+    return CurrentUser(id=str(claims["sub"]), email=str(claims.get("email", "")), name=str(meta.get("full_name", "")),
+                       role=str(app_meta.get("role") or "member"))
 
 
 def _from(authorization: str | None, token_param: str | None) -> CurrentUser:
     if not auth_enabled():
-        return CurrentUser(id=LOCAL_OWNER, name="Usuário local")
+        return CurrentUser(id=LOCAL_OWNER, name="Usuário local", role="owner")
     token = None
     if authorization and authorization.lower().startswith("bearer "):
         token = authorization[7:].strip()
