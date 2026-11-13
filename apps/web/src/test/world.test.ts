@@ -82,6 +82,18 @@ describe('AmbientWorld (camada ambiental)', () => {
     expect(pxToTile(office, a.x, a.y)).toEqual({ x: home.x, y: home.y })
   })
 
+  it('aguardando dependência: vai para a estação e permanece lá (não sai para café/conversa)', () => {
+    const w = makeWorld(3, 7)
+    const a = w.list()[0]
+    w.setOperational(a.id, { state: 'waiting', taskTitle: 'Comparar abordagens', partnerId: null, progress: 0, origin: 'real' })
+    for (let i = 0; i < 1200 && !(a.pointId === a.homePointId && !a.path.length); i++) w.tick(50)
+    const home = w.pointById(a.homePointId)!
+    expect(pxToTile(office, a.x, a.y)).toEqual({ x: home.x, y: home.y })
+    for (let i = 0; i < 2000; i++) w.tick(50)
+    expect(pxToTile(office, a.x, a.y)).toEqual({ x: home.x, y: home.y })
+    expect(a.partnerId).toBeNull()
+  })
+
   it('agente pausado não circula', () => {
     const w = makeWorld(2, 9)
     const a = w.list()[0]

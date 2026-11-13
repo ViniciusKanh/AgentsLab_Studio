@@ -11,6 +11,15 @@
 
 > As capturas acima são geradas automaticamente com a API em **modo de teste** (respostas determinísticas, sem LLM real) para não depender de chaves no CI. Com suas chaves, o mesmo fluxo usa os modelos reais.
 
+## v1.4 — execução multiagente rastreável
+- **Execução real em paralelo** com limite por provedor, retentativas em 429/5xx, tempo limite por tarefa, pausa, retomada e cancelamento imediato — tudo no backend (fechar a página não interrompe).
+- **Contexto mínimo por agente** (documentos e evidências que cada tarefa recebeu ficam registrados) e **uso de ferramentas** auditável.
+- **Referências verificadas** no Crossref/arXiv; as não confirmadas aparecem marcadas no relatório.
+- **Documentos identificados** (código, autoria, versão, data, projeto, tarefa de origem) com histórico e diff.
+- **Feedback em documento ou tarefa**: o responsável cria nova versão e os documentos dependentes são atualizados em sequência, com nova revisão.
+- **Espaço do projeto em 6 áreas**: Planejamento · Execução · Conversas · Documentos · Revisão · Custos. O coordenador avisa quando uma decisão sua é necessária.
+- Relatório de testes: [docs/VALIDACAO_EXECUCAO.md](docs/VALIDACAO_EXECUCAO.md).
+
 ## v1.3 — contas, publicação e celular
 
 - **Login e cadastro reais com Supabase Auth** (telas pixel art dos protótipos): e-mail + senha, mostrar/ocultar senha, “lembrar de mim”, verificação de e-mail obrigatória, recuperação e redefinição de senha, links expirados tratados, logout e rotas protegidas. Senhas e tokens ficam com o Supabase — o app nunca os armazena.
@@ -127,4 +136,4 @@ apps/web/src
 tools/pixelart           gerador procedural de sprites e mapas
 ```
 
-Documentação: [Supabase](docs/SUPABASE.md) · [Publicação](docs/DEPLOY.md) · [Plano de adaptação](docs/PLANO_ADAPTACAO.md) · [Arquitetura](docs/ARCHITECTURE.md) · [Roadmap](docs/ROADMAP.md) · [Design System](docs/DESIGN_SYSTEM.md) · [Agentes](docs/AGENT_MODEL.md) · [CLAUDE.md](CLAUDE.md)
+Documentação: [Validação v1.4](docs/VALIDACAO_EXECUCAO.md) · [Supabase](docs/SUPABASE.md) · [Publicação](docs/DEPLOY.md) · [Plano de adaptação](docs/PLANO_ADAPTACAO.md) · [Arquitetura](docs/ARCHITECTURE.md) · [Roadmap](docs/ROADMAP.md) · [Design System](docs/DESIGN_SYSTEM.md) · [Agentes](docs/AGENT_MODEL.md) · [CLAUDE.md](CLAUDE.md)

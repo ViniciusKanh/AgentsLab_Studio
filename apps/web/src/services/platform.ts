@@ -1,5 +1,5 @@
 import type {
-  AgentMessage, Artifact, ArtifactContent, Evidence, Execution, Organization, OrgTemplate, Overview, Project, ProjectTask, Usage,
+  AgentActivity, AgentMessage, Artifact, ArtifactContent, Evidence, Execution, Organization, OrgTemplate, Overview, Project, ProjectTask, ToolCall, Usage,
 } from '@/types/platform'
 import type { Provider } from '@/types/domain'
 import { errorText } from './api/apiDataSource'
@@ -31,7 +31,11 @@ export const platform = {
   decideDelivery: (id: string, approve: boolean, note = '') => post<Project>(`/projects/${id}/delivery/decision`, { approve, note }),
   control: (id: string, action: 'pause' | 'resume' | 'cancel') => post<Project>(`/projects/${id}/control`, { action }),
   setBudget: (id: string, budgetUsd: number) => put<Project>(`/projects/${id}/budget`, { budgetUsd }),
-  feedback: (id: string, artifactId: string, text: string, agentId?: string) => post<Project>(`/projects/${id}/feedback`, { artifactId, text, agentId }),
+  /** Feedback sobre um documento OU uma tarefa; o backend roteia ao responsável e propaga às dependentes. */
+  feedback: (id: string, target: { artifactId?: string; taskId?: string }, text: string, agentId?: string) =>
+    post<Project & { feedback: { tasks: string[]; agentId: string | null } }>(`/projects/${id}/feedback`, { ...target, text, agentId }),
+  toolCalls: (id: string) => http<ToolCall[]>(`/projects/${id}/tool-calls`),
+  agentActivity: (agentId: string) => http<AgentActivity>(`/agents/${agentId}/activity`),
   guidance: (id: string, agentId: string, text: string) => post(`/projects/${id}/guidance`, { agentId, text }),
   messages: (id: string) => http<AgentMessage[]>(`/projects/${id}/messages`),
   artifacts: (id: string) => http<Artifact[]>(`/projects/${id}/artifacts`),
@@ -86,5 +90,14 @@ export const MESSAGE_TYPE: Record<string, { label: string; color: string }> = {
   solicitacao: { label: 'Solicitação', color: '#39d6ff' }, resposta: { label: 'Resposta', color: '#e9ecf5' }, delegacao: { label: 'Delegação', color: '#9d62ff' },
   entrega: { label: 'Entrega', color: '#00f5a0' }, revisao: { label: 'Revisão', color: '#ffb800' }, correcao: { label: 'Correção', color: '#ffb800' },
   aprovacao: { label: 'Aprovação', color: '#00f5a0' }, alerta: { label: 'Alerta', color: '#ff537a' }, discussao: { label: 'Discussão', color: '#39d6ff' },
-  orientacao: { label: 'Orientação', color: '#9d62ff' }, feedback: { label: 'Feedback', color: '#ff537a' },
+  orientacao: { label: 'Orientação', color: '#9d62ff' }, feedback: { label: 'Feedback', color: '#ff537a' }, decisao: { label: 'Decisão necessária', color: '#ffb800' },
 }
+
+export const VERIFICATION: Record<string, { label: string; color: string }> = {
+  verificada: { label: 'Verificada', color: '#00f5a0' },
+  nao_confirmada: { label: 'Não confirmada', color: '#ff537a' },
+  divergente: { label: 'Divergente', color: '#ff537a' },
+  pendente: { label: 'Verificação pendente', color: '#ffb800' },
+}
+
+export const TOOL_LABEL: Record<string, string> = { literature_search: 'Busca acadêmica (OpenAlex/arXiv)', reference_verify: 'Verificação de referência (Crossref/arXiv)' }

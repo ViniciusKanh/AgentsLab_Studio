@@ -20,6 +20,8 @@ export type AgentRuntimeState =
   | 'completed'
   | 'failed'
   | 'paused'
+  /** tem tarefa no projeto, mas aguarda uma dependência terminar */
+  | 'waiting'
 
 export type AgentStatus = 'active' | 'paused' | 'archived'
 export type AutonomyLevel = 'manual' | 'supervised' | 'autonomous'
@@ -339,7 +341,7 @@ export interface Task {
 }
 
 export type SimulationEvent =
-  | { type: 'agent.state'; agentId: string; state: AgentRuntimeState; taskId?: string; taskTitle?: string; partnerId?: string; ts: string; origin: DataOrigin }
+  | { type: 'agent.state'; agentId: string; state: AgentRuntimeState; taskId?: string; taskTitle?: string; taskKind?: string; projectId?: string; partnerId?: string; ts: string; origin: DataOrigin }
   | { type: 'task.progress'; agentId: string; taskId: string; progress: number; tokens: number; ts: string; origin: DataOrigin }
   | { type: 'task.finished'; agentId: string; taskId: string; status: 'done' | 'failed'; tokens: number; costUsd: number; durationMs: number; result: string; ts: string; origin: DataOrigin }
   | { type: 'log'; entry: LogEntry; ts: string; origin: DataOrigin }
@@ -349,6 +351,9 @@ export interface AgentRuntime {
   state: AgentRuntimeState
   taskId: string | null
   taskTitle: string | null
+  /** tipo da tarefa real (research, analysis, writing, review, revision...) */
+  taskKind?: string | null
+  projectId?: string | null
   progress: number
   partnerId: string | null
   since: string

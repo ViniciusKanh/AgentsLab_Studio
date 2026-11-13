@@ -26,7 +26,9 @@ function inline(text: string, key: string): ReactNode[] {
   return out
 }
 
-export function Markdown({ source, className }: { source: string; className?: string }) {
+/** size="lg": leitura de documentos (texto maior); padrão compacto para painéis. */
+export function Markdown({ source, className, size = 'sm' }: { source: string; className?: string; size?: 'sm' | 'lg' }) {
+  const lg = size === 'lg'
   const lines = source.replace(/\r/g, '').split('\n')
   const blocks: ReactNode[] = []
   let i = 0
@@ -37,8 +39,8 @@ export function Markdown({ source, className }: { source: string; className?: st
     if (!line.trim()) { i++; continue }
     const h = /^(#{1,4})\s+(.*)$/.exec(line)
     if (h) {
-      const size = ['text-[17px]', 'text-[15px]', 'text-[13.5px]', 'text-[12.5px]'][h[1].length - 1]
-      blocks.push(<p key={k} className={`${size} mb-1.5 mt-3 font-extrabold text-lab-text`}>{inline(h[2], k)}</p>)
+      const hs = (lg ? ['text-[22px]', 'text-[18px]', 'text-[16px]', 'text-[15px]'] : ['text-[17px]', 'text-[15px]', 'text-[13.5px]', 'text-[12.5px]'])[h[1].length - 1]
+      blocks.push(<p key={k} className={`${hs} ${lg ? 'mb-2 mt-5' : 'mb-1.5 mt-3'} font-extrabold text-lab-text`}>{inline(h[2], k)}</p>)
       i++
       continue
     }
@@ -51,7 +53,7 @@ export function Markdown({ source, className }: { source: string; className?: st
       }
       blocks.push(
         <div key={k} className="my-2 overflow-x-auto">
-          <table className="w-full border-collapse text-[11.5px]">
+          <table className={`w-full border-collapse ${lg ? 'text-[13px]' : 'text-[11.5px]'}`}>
             <tbody>{rows.map((r, ri) => <tr key={ri} className={ri === 0 ? 'bg-white/5 font-bold' : 'border-t border-white/10'}>{r.map((c, ci) => <td key={ci} className="px-2 py-1 align-top">{inline(c, `${k}-${ri}-${ci}`)}</td>)}</tr>)}</tbody>
           </table>
         </div>,
@@ -70,5 +72,5 @@ export function Markdown({ source, className }: { source: string; className?: st
     while (i < lines.length && lines[i].trim() && !/^(#{1,4}\s|\s*\||\s*([-*]|\d+\.)\s)/.test(lines[i])) { para.push(lines[i]); i++ }
     blocks.push(<p key={k} className="my-1.5">{para.map((p, pi) => <Fragment key={pi}>{pi > 0 && <br />}{inline(p, `${k}-${pi}`)}</Fragment>)}</p>)
   }
-  return <div className={`min-w-0 break-words text-[12px] leading-relaxed ${className ?? ''}`}>{blocks}</div>
+  return <div className={`min-w-0 break-words ${lg ? 'text-[14.5px] leading-[1.7]' : 'text-[12px] leading-relaxed'} ${className ?? ''}`}>{blocks}</div>
 }

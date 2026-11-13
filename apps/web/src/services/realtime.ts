@@ -29,7 +29,8 @@ export function dispatchPlatformEvent(e: PlatformEvent) {
   switch (e.type) {
     case 'agent.state':
       sim.ingest({ type: 'agent.state', agentId: String(p.agentId), state: p.state as AgentRuntimeState, taskId: (p.taskId as string) ?? undefined,
-        taskTitle: (p.taskTitle as string) ?? undefined, partnerId: (p.partnerId as string) ?? undefined, ts, origin: 'real' })
+        taskTitle: (p.taskTitle as string) ?? undefined, taskKind: (p.taskKind as string) ?? undefined, projectId: (p.projectId as string) ?? e.projectId ?? undefined,
+        partnerId: (p.partnerId as string) ?? undefined, ts, origin: 'real' })
       break
     case 'task.progress':
       sim.ingest({ type: 'task.progress', agentId: String(p.agentId), taskId: String(p.taskId), progress: Number(p.progress ?? 0), tokens: Number(p.tokens ?? 0), ts, origin: 'real' })

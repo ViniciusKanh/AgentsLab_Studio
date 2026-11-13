@@ -51,11 +51,12 @@ interface PanelProps {
   children?: ReactNode
   style?: CSSProperties
   stripes?: boolean
+  'data-testid'?: string
 }
 
-export function Panel({ title, icon, accent = 'purple', actions, demo, className, bodyClassName, children, style, stripes }: PanelProps) {
+export function Panel({ title, icon, accent = 'purple', actions, demo, className, bodyClassName, children, style, stripes, 'data-testid': testId }: PanelProps) {
   return (
-    <section className={cx('px-panel flex min-h-0 flex-col', `c-${accent}`, className)} style={style}>
+    <section className={cx('px-panel flex min-h-0 flex-col', `c-${accent}`, className)} style={style} data-testid={testId}>
       {title !== undefined && (
         <header className="flex items-center gap-2 border-b border-white/5 px-3 pb-1.5 pt-2">
           {icon && <span className="flex items-center" style={{ color: ACCENT_HEX[accent] }}>{icon}</span>}

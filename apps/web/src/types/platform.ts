@@ -40,7 +40,19 @@ export interface ProjectTask {
   position: number
   startedAt: string | null
   finishedAt: string | null
+  /** Contexto efetivamente entregue ao agente (documentos/versões e evidências). */
+  context?: TaskContext
+  attempts?: number
 }
+
+export interface TaskContext {
+  inputs?: { artifactId: string; code: string; title: string; version: number; fromTask: string | null }[]
+  evidence?: string[]
+  guidanceMessages?: number
+  target?: { artifactId: string; code: string; title: string; version: number }
+}
+
+export interface ApprovedPlan { aprovadoEm: string; nota: string; tarefas: { key: string; title: string; kind: TaskKind; agentId: string | null; dependsOn: string[]; deliverable: string }[] }
 
 export interface ProjectPlan {
   objetivo?: string
@@ -51,6 +63,7 @@ export interface ProjectPlan {
   estimativa_custo_usd?: number
   estimativa_e_aproximada?: boolean
   tarefa_avulsa?: boolean
+  plano_aprovado?: ApprovedPlan
 }
 
 export interface Approval { id: string; kind: 'plan' | 'delivery'; status: string; note: string; createdAt: string; decidedAt: string | null }
@@ -74,7 +87,7 @@ export interface Project {
   approvals?: Approval[]
 }
 
-export type MessageType = 'solicitacao' | 'resposta' | 'delegacao' | 'entrega' | 'revisao' | 'correcao' | 'aprovacao' | 'alerta' | 'discussao' | 'orientacao' | 'feedback'
+export type MessageType = 'solicitacao' | 'resposta' | 'delegacao' | 'entrega' | 'revisao' | 'correcao' | 'aprovacao' | 'alerta' | 'discussao' | 'orientacao' | 'feedback' | 'decisao'
 
 export interface AgentMessage {
   id: string
@@ -88,21 +101,42 @@ export interface AgentMessage {
   content: string
   artifactIds: string[]
   status: 'pending' | 'processed'
+  /** Coordenador pedindo uma decisão humana (pendente até o gestor agir). */
+  needsDecision?: boolean
   createdAt: string
 }
 
 export interface ArtifactVersionMeta { version: number; agentId: string | null; note: string; createdAt: string; chars: number }
+export interface DocumentMetadata {
+  code: string
+  type: string
+  author: string
+  authorRole: string
+  lastEditor: string
+  version: number
+  date: string
+  project: string
+  projectId: string
+  originTask: string
+  originTaskId: string | null
+}
 export interface Artifact {
   id: string
+  code?: string
   title: string
   kind: 'findings' | 'analysis' | 'report' | 'review' | string
   agentId: string | null
   taskId: string | null
   currentVersion: number
   createdAt: string
+  updatedAt?: string
+  metadata?: DocumentMetadata
   versions: ArtifactVersionMeta[]
 }
-export interface ArtifactContent { artifactId: string; version: number; content: string; note: string; agentId: string | null; createdAt: string }
+export interface ArtifactContent { artifactId: string; version: number; content: string; note: string; agentId: string | null; createdAt: string; metadata?: DocumentMetadata }
+
+export type VerificationStatus = 'verificada' | 'nao_confirmada' | 'divergente' | 'pendente'
+
 
 export interface Evidence {
   id: string
@@ -119,6 +153,27 @@ export interface Evidence {
   taskId: string | null
   agentId: string | null
   accessedAt: string
+  verification?: VerificationStatus
+  verificationNote?: string
+}
+
+export interface ToolCall { id: string; projectId: string | null; taskId: string | null; agentId: string | null; tool: string; input: string; output: string; status: 'ok' | 'error'; latencyMs: number; createdAt: string }
+
+export interface AgentActivityTask {
+  id: string; key: string; title: string; kind: TaskKind; status: TaskStatus; step: string; stepsDone: number; stepsTotal: number
+  projectId: string; projectTitle: string; projectStatus: ProjectStatus; error: string; dependsOn: string[]
+  startedAt: string | null; finishedAt: string | null; resultArtifactId: string | null; context: TaskContext
+}
+export interface AgentActivity {
+  agentId: string
+  current: AgentActivityTask[]
+  waiting: AgentActivityTask[]
+  history: AgentActivityTask[]
+  artifacts: { id: string; code: string; title: string; kind: string; projectId: string; projectTitle: string; currentVersion: number; createdAt: string }[]
+  messages: AgentMessage[]
+  toolCalls: ToolCall[]
+  executions: Execution[]
+  totals: { tokens: number; costUsd: number; toolCalls: number }
 }
 
 export interface Execution {
@@ -134,7 +189,7 @@ export interface Execution {
   costUsd: number
   costIsEstimate: boolean
   latencyMs: number
-  status: 'ok' | 'error'
+  status: 'ok' | 'error' | 'retry'
   error: string
   createdAt: string
 }

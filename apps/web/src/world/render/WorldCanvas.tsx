@@ -3,7 +3,7 @@ import type Phaser from 'phaser'
 import { useWorldStore } from '@/stores/worldStore'
 import { useLabStore } from '@/stores/labStore'
 import { useSimulationStore } from '@/stores/simulationStore'
-import { STATE_META } from '@/simulation/states'
+import { activityLabel, STATE_META } from '@/simulation/states'
 import { Avatar } from '@/components/ui/primitives'
 import { WorldOverlay } from './WorldOverlay'
 import type { WorldBridge } from './WorldScene'
@@ -87,7 +87,7 @@ function FallbackWorld({ envId, reason }: { envId: string; reason: string }) {
           return (
             <button key={a.id} onClick={() => select(a.id)} className="px-inset flex items-center gap-2 p-2 text-left">
               <Avatar characterId={a.appearance.characterId} size={32} ring={m.color} />
-              <span><b className="block text-[12px]">{a.name}</b><span className="text-[10.5px]" style={{ color: m.color }}>{m.label}</span></span>
+              <span><b className="block text-[12px]">{a.name}</b><span className="text-[10.5px]" style={{ color: m.color }}>{activityLabel(runtime[a.id]?.state ?? 'idle', runtime[a.id]?.taskKind)}</span></span>
             </button>
           )
         })}

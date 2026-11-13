@@ -16,9 +16,14 @@ from app.config import auth_enabled, settings
 from app.routers import credentials, health, organizations, projects, system
 
 # colunas adicionadas depois da v1.2 (bancos existentes são atualizados sem perder dados)
+_OWNER = "VARCHAR(64) NOT NULL DEFAULT 'local'"
 _NEW_COLUMNS = {
-    "organizations": ["owner_id"], "agents": ["owner_id"], "projects": ["owner_id"], "agent_messages": ["owner_id"],
-    "executions": ["owner_id"], "credentials": ["owner_id"], "events": ["owner_id"],
+    "organizations": {"owner_id": _OWNER}, "agents": {"owner_id": _OWNER}, "projects": {"owner_id": _OWNER},
+    "agent_messages": {"owner_id": _OWNER, "needs_decision": "BOOLEAN NOT NULL DEFAULT FALSE"},
+    "executions": {"owner_id": _OWNER}, "credentials": {"owner_id": _OWNER}, "events": {"owner_id": _OWNER},
+    "tasks": {"context": "JSON", "attempts": "INTEGER NOT NULL DEFAULT 0"},
+    "artifacts": {"code": "VARCHAR(20) NOT NULL DEFAULT ''"},
+    "evidence": {"verification": "VARCHAR(20) NOT NULL DEFAULT 'pendente'", "verification_note": "TEXT NOT NULL DEFAULT ''"},
 }
 
 
@@ -32,9 +37,9 @@ def migrate():
             if table not in tables:
                 continue
             have = {c["name"] for c in insp.get_columns(table, schema=sch)}
-            for col in cols:
+            for col, ddl in cols.items():
                 if col not in have:
-                    conn.execute(text(f"ALTER TABLE {prefix}{table} ADD COLUMN {col} VARCHAR(64) NOT NULL DEFAULT 'local'"))
+                    conn.execute(text(f"ALTER TABLE {prefix}{table} ADD COLUMN {col} {ddl}"))
         if sch:
             # defesa em profundidade: RLS ligado em todas as tabelas (o backend, dono das tabelas, não é afetado;
             # papéis anon/authenticated do Supabase ficam sem acesso salvo políticas explícitas — ver supabase/migrations)

@@ -209,3 +209,39 @@ async def assign(aid: str, body: AssignIn, db: Session = Depends(get_db), u: Cur
 
 def _404(what: str):
     raise HTTPException(404, f"{what} não encontrado(a)")
+
+
+@router.get("/agents/{aid}/activity")
+def agent_activity(aid: str, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    """Trabalho real do agente: tarefas (atual e histórico), documentos, ferramentas usadas, mensagens e chamadas de modelo."""
+    from app.models import AgentMessage, Artifact, Execution, Project, Task, ToolCall
+    from app.services.orchestrator import execution_public, message_public, tool_call_public
+
+    a = own_agent(db, aid, u)
+    projects = {p.id: p for p in db.scalars(select(Project).where(Project.owner_id == u.id))}
+    tasks = [t for t in db.scalars(select(Task).where(Task.agent_id == a.id).order_by(Task.started_at.desc().nulls_last(), Task.position)) if t.project_id in projects]
+
+    def tp(t):
+        p = projects[t.project_id]
+        return {"id": t.id, "key": t.key, "title": t.title, "kind": t.kind, "status": t.status, "step": t.step, "stepsDone": t.steps_done, "stepsTotal": t.steps_total,
+                "projectId": p.id, "projectTitle": p.title, "projectStatus": p.status, "error": t.error, "dependsOn": t.depends_on or [],
+                "startedAt": t.started_at.isoformat() if t.started_at else None, "finishedAt": t.finished_at.isoformat() if t.finished_at else None,
+                "resultArtifactId": t.result_artifact_id, "context": t.context or {}}
+
+    current = [tp(t) for t in tasks if t.status == "running"]
+    waiting = [tp(t) for t in tasks if t.status == "pending" and projects[t.project_id].status in ("running", "revising")]
+    arts = list(db.scalars(select(Artifact).where(Artifact.agent_id == a.id).order_by(Artifact.created_at.desc()).limit(20)))
+    msgs = list(db.scalars(select(AgentMessage).where(AgentMessage.owner_id == u.id, (AgentMessage.from_agent_id == a.id) | (AgentMessage.to_agent_id == a.id))
+                           .order_by(AgentMessage.created_at.desc()).limit(30)))
+    tools = list(db.scalars(select(ToolCall).where(ToolCall.agent_id == a.id, ToolCall.owner_id == u.id).order_by(ToolCall.created_at.desc()).limit(30)))
+    exes = list(db.scalars(select(Execution).where(Execution.agent_id == a.id, Execution.owner_id == u.id).order_by(Execution.created_at.desc()).limit(30)))
+    return {
+        "agentId": a.id, "current": current, "waiting": waiting,
+        "history": [tp(t) for t in tasks if t.status in ("done", "failed", "cancelled")][:20],
+        "artifacts": [{"id": x.id, "code": x.code, "title": x.title, "kind": x.kind, "projectId": x.project_id, "projectTitle": projects[x.project_id].title if x.project_id in projects else "",
+                       "currentVersion": x.current_version, "createdAt": x.created_at.isoformat()} for x in arts if x.project_id in projects],
+        "messages": [message_public(m) for m in reversed(msgs)],
+        "toolCalls": [tool_call_public(c) for c in tools],
+        "executions": [execution_public(e) for e in exes],
+        "totals": {"tokens": sum(e.input_tokens + e.output_tokens for e in exes), "costUsd": round(sum(e.cost_usd for e in exes), 6), "toolCalls": len(tools)},
+    }

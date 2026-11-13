@@ -143,6 +143,7 @@ test.describe('Autenticação', () => {
     await page.getByTestId('pw-submit').click()
     await expect(page.getByText('Senha alterada com sucesso')).toBeVisible()
     await page.getByTestId('settings-logout').click()
+    await expect(page.getByTestId('login-email')).toBeVisible() // aguarda o encerramento da sessão antes de navegar
     await login(page, email, 'OutraSenha#789')
   })
 

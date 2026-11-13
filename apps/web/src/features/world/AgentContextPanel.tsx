@@ -1,27 +1,27 @@
 import { modelLabel } from '@/lib/format'
 import { useMemo, useRef, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Briefcase, Crosshair, ExternalLink, MessageSquare, Send, X } from 'lucide-react'
 import type { Agent } from '@/types/domain'
 import { useSimulationStore } from '@/stores/simulationStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useAgentUsage } from '@/hooks/useAgentUsage'
-import { platform, MESSAGE_TYPE } from '@/services/platform'
+import { platform, MESSAGE_TYPE, TASK_KIND, TOOL_LABEL } from '@/services/platform'
 import { onPlatformEvent } from '@/services/realtime'
-import type { AgentMessage } from '@/types/platform'
+import type { AgentActivity, AgentActivityTask, AgentMessage } from '@/types/platform'
 import { useLabStore } from '@/stores/labStore'
-import { STATE_META } from '@/simulation/states'
+import { activityLabel, STATE_META } from '@/simulation/states'
 import { worldBus } from '@/world/events/bus'
 import { Avatar, Chip, DemoTag, ProgressBar, Tabs, cx } from '@/components/ui/primitives'
 import { providerIconUrl } from '@/lib/assets'
 import { fmtClock, fmtCost, fmtInt, timeAgo } from '@/lib/format'
 import { appConfig } from '@/services/config'
 
-type T = 'status' | 'chat' | 'historico' | 'interacoes'
+type T = 'status' | 'trabalho' | 'chat' | 'historico' | 'interacoes'
 
 /** Painel contextual compacto do agente selecionado (some ao fechar). */
 export function AgentContextPanel({ agent, onClose, onAssign }: { agent: Agent; onClose: () => void; onAssign: () => void }) {
-  const [tab, setTab] = useState<T>('status')
+  const [tab, setTab] = useState<T>(appConfig.mode === 'real' ? 'trabalho' : 'status')
   const rt = useSimulationStore((s) => s.runtime[agent.id])
   const credentials = useLabStore((s) => s.credentials)
   const nav = useNavigate()
@@ -37,7 +37,7 @@ export function AgentContextPanel({ agent, onClose, onAssign }: { agent: Agent; 
           <p className="truncate text-[14px] font-extrabold">{agent.name}</p>
           <p className="truncate text-[11px] text-lab-muted">{agent.role} · {agent.department}</p>
           <div className="mt-1 flex flex-wrap items-center gap-1">
-            <Chip color={meta.color}>{meta.label}</Chip>
+            <Chip color={meta.color}>{activityLabel(rt?.state ?? 'idle', rt?.taskKind)}</Chip>
             {agent.origin === 'demo' && <DemoTag label="EXEMPLO" />}
             {agent.isCoordinator && <Chip color="#ffb800">Coordenador</Chip>}
           </div>
@@ -51,7 +51,7 @@ export function AgentContextPanel({ agent, onClose, onAssign }: { agent: Agent; 
         <button className="px-btn sm" style={{ ['--c' as string]: '#9d62ff' }} onClick={() => nav(`/agentes/${agent.id}`)}><ExternalLink size={13} /> Detalhes</button>
       </div>
 
-      <Tabs value={tab} onChange={setTab} className="px-3 pt-2.5" items={[{ id: 'status', label: 'Status' }, { id: 'chat', label: 'Chat' }, { id: 'historico', label: 'Histórico' }, { id: 'interacoes', label: 'Interações' }]} />
+      <Tabs value={tab} onChange={setTab} className="px-3 pt-2.5" items={[{ id: 'trabalho', label: 'Trabalho' }, { id: 'status', label: 'Status' }, { id: 'chat', label: 'Chat' }, { id: 'historico', label: 'Chamadas' }, { id: 'interacoes', label: 'Mensagens' }]} />
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
         {tab === 'status' && (
@@ -77,6 +77,7 @@ export function AgentContextPanel({ agent, onClose, onAssign }: { agent: Agent; 
             <button className="px-btn sm ghost w-full" style={{ ['--c' as string]: '#39d6ff' }} onClick={() => worldBus.emit('camera:focus', { agentId: agent.id })}><Crosshair size={13} /> Centralizar</button>
           </div>
         )}
+        {tab === 'trabalho' && <AgentWork agentId={agent.id} />}
         {tab === 'chat' && <AgentChat agent={agent} />}
         {tab === 'historico' && <AgentHistory agentId={agent.id} />}
         {tab === 'interacoes' && <AgentInteractions agentId={agent.id} />}
@@ -151,6 +152,69 @@ function AgentInteractions({ agentId }: { agentId: string }) {
           <p className="line-clamp-4 whitespace-pre-wrap">{m.content}</p>
         </div>
       ))}
+    </div>
+  )
+}
+
+const TASK_STATUS_LABEL: Record<string, { label: string; color: string }> = {
+  running: { label: 'em execução', color: '#39d6ff' }, pending: { label: 'aguardando', color: '#8b97c4' }, done: { label: 'concluída', color: '#00f5a0' },
+  failed: { label: 'falhou', color: '#ff537a' }, cancelled: { label: 'cancelada', color: '#8a93b0' }, proposed: { label: 'proposta', color: '#8b97c4' },
+}
+
+/** Trabalho real do agente: tarefa atual, pendências, resultados, ferramentas usadas e histórico (backend). */
+function AgentWork({ agentId }: { agentId: string }) {
+  const [data, setData] = useState<AgentActivity | null>(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    if (appConfig.mode !== 'real') return
+    let t: ReturnType<typeof setTimeout> | null = null
+    const load = () => platform.agentActivity(agentId).then((d) => { setData(d); setError('') }).catch((e: Error) => setError(e.message))
+    void load()
+    const off = onPlatformEvent((e) => {
+      const p = e.payload as { agentId?: string }
+      if (p.agentId !== agentId || t) return
+      t = setTimeout(() => { t = null; void load() }, 500)
+    })
+    return () => { off(); if (t) clearTimeout(t) }
+  }, [agentId])
+  if (appConfig.mode !== 'real') return <p className="text-[12px] text-lab-muted">Conecte o backend para ver o trabalho real do agente.</p>
+  if (error) return <p className="text-[12px] text-neon-pink">{error}</p>
+  if (!data) return <p className="animate-pulse text-[12px] text-lab-muted">Carregando…</p>
+  const taskLink = (t: AgentActivityTask) => `/projetos/${t.projectId}?area=execucao&tarefa=${t.id}`
+  const TaskRow = ({ t }: { t: AgentActivityTask }) => (
+    <Link to={taskLink(t)} className="block rounded-[6px] bg-white/[0.04] px-2.5 py-2 hover:bg-white/[0.08]">
+      <span className="flex items-center gap-1.5"><span className="font-mono font-bold text-neon-cyan">{t.key}</span><b className="min-w-0 flex-1 truncate">{t.title}</b><Chip color={TASK_STATUS_LABEL[t.status]?.color}>{TASK_STATUS_LABEL[t.status]?.label ?? t.status}</Chip></span>
+      <span className="block truncate text-[11.5px] text-lab-muted">{TASK_KIND[t.kind]} · {t.projectTitle}</span>
+      {t.status === 'running' && t.stepsTotal > 0 && <><ProgressBar value={t.stepsDone / t.stepsTotal} height={5} className="mt-1" /><span className="text-[11.5px] text-neon-cyan">{t.step}</span></>}
+      {t.status === 'pending' && t.dependsOn.length > 0 && <span className="block text-[11.5px] text-lab-muted">Depende de {t.dependsOn.join(', ')}</span>}
+      {t.error && <span className="block text-[11.5px] text-neon-pink">{t.error.slice(0, 140)}</span>}
+    </Link>
+  )
+  return (
+    <div className="space-y-3 text-[12.5px]" data-testid="agent-work">
+      <section>
+        <p className="mb-1 font-extrabold">Agora</p>
+        {data.current.length === 0 && data.waiting.length === 0 ? <p className="text-lab-muted">Sem tarefa em andamento.</p> : (
+          <div className="space-y-1.5">{[...data.current, ...data.waiting].map((t) => <TaskRow key={t.id} t={t} />)}</div>
+        )}
+      </section>
+      <section>
+        <p className="mb-1 font-extrabold">Resultados ({data.artifacts.length})</p>
+        {data.artifacts.length === 0 ? <p className="text-lab-muted">Nenhum documento produzido.</p> : data.artifacts.slice(0, 8).map((a) => (
+          <Link key={a.id} to={`/projetos/${a.projectId}?area=documentos&doc=${a.id}`} className="block truncate py-0.5 hover:text-neon-green"><span className="font-mono text-neon-cyan">{a.code}</span> {a.title} · v{a.currentVersion}</Link>
+        ))}
+      </section>
+      <section>
+        <p className="mb-1 font-extrabold">Ferramentas usadas ({data.totals.toolCalls})</p>
+        {data.toolCalls.length === 0 ? <p className="text-lab-muted">Nenhuma.</p> : data.toolCalls.slice(0, 8).map((c) => (
+          <p key={c.id} className="truncate border-b border-white/5 py-1"><span className={c.status === 'ok' ? 'text-neon-gold' : 'text-neon-pink'}>{TOOL_LABEL[c.tool] ?? c.tool}</span> · <span className="text-lab-muted">{c.input}</span></p>
+        ))}
+      </section>
+      <section>
+        <p className="mb-1 font-extrabold">Histórico ({data.history.length})</p>
+        {data.history.length === 0 ? <p className="text-lab-muted">Nenhuma tarefa finalizada.</p> : <div className="space-y-1.5">{data.history.slice(0, 8).map((t) => <TaskRow key={t.id} t={t} />)}</div>}
+      </section>
+      <p className="text-[11.5px] text-lab-muted">{fmtInt(data.totals.tokens)} tokens · {fmtCost(data.totals.costUsd)} nas últimas chamadas registradas</p>
     </div>
   )
 }

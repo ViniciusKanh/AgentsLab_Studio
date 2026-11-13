@@ -11,22 +11,23 @@ from __future__ import annotations
 import asyncio
 import difflib
 import re
+import time
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
 
 from app.config import settings
 from app.db import session_scope
-from app.models import Agent, AgentMessage, Approval, Artifact, ArtifactVersion, Evidence, Execution, Project, Task
+from app.models import Agent, AgentMessage, Approval, Artifact, ArtifactVersion, Evidence, Execution, Project, Task, ToolCall
 from app.services import prompts as P
 from app.services.events import hub
-from app.services.llm import LLMError, MissingCredential, get_gateway, parse_json
+from app.services.llm import LLMError, MissingCredential, TransientLLMError, get_gateway, parse_json
 from app.services.tools import get_tools
 from app.services.providers import resolve_model
 from app.services.vault import CredentialService
 
 KIND_MAP = {"pesquisa": "research", "analise": "analysis", "análise": "analysis", "redacao": "writing", "redação": "writing", "revisao": "review", "revisão": "review", "geral": "general"}
-STEPS = {"research": 4, "analysis": 2, "writing": 3, "review": 2, "revision": 3, "general": 2}
+STEPS = {"research": 5, "analysis": 2, "writing": 3, "review": 2, "revision": 3, "general": 2}
 
 
 class StopProject(Exception):
@@ -48,6 +49,14 @@ class Orchestrator:
     def __init__(self):
         self.runners: dict[str, asyncio.Task] = {}
         self._owners: dict[str, str] = {}
+        self._provider_sems: dict[tuple[int, str], asyncio.Semaphore] = {}
+
+    def provider_slot(self, provider: str) -> asyncio.Semaphore:
+        """Limita chamadas simultâneas por provedor (por loop de eventos)."""
+        key = (id(asyncio.get_running_loop()), provider)
+        if key not in self._provider_sems:
+            self._provider_sems[key] = asyncio.Semaphore(max(1, settings.provider_concurrency))
+        return self._provider_sems[key]
 
     # ------------------------------------------------------------------ utilidades
     def owner_of(self, project_id: str | None) -> str:
@@ -64,20 +73,44 @@ class Orchestrator:
 
     def agent_state(self, agent_id: str | None, state: str, task: Task | None = None, partner: str | None = None, project_id: str | None = None):
         if agent_id:
-            self.emit("agent.state", {"agentId": agent_id, "state": state, "taskId": task.id if task else None,
-                                      "taskTitle": task.title if task else None, "partnerId": partner}, project_id)
+            self.emit("agent.state", {"agentId": agent_id, "state": state, "taskId": task.id if task else None, "taskTitle": task.title if task else None,
+                                      "taskKind": task.kind if task else None, "projectId": project_id, "partnerId": partner}, project_id)
 
     def message(self, project_id: str | None, type_: str, content: str, *, from_agent: str | None = None, to_agent: str | None = None,
                 from_kind: str = "agent", to_kind: str = "agent", task_id: str | None = None, artifact_ids: list | None = None, status: str = "processed",
-                owner: str | None = None) -> dict:
+                owner: str | None = None, needs_decision: bool = False) -> dict:
         owner = owner or self.owner_of(project_id)
         with session_scope() as s:
             m = AgentMessage(owner_id=owner, project_id=project_id, task_id=task_id, from_kind=from_kind, from_agent_id=from_agent, to_kind=to_kind,
-                             to_agent_id=to_agent, type=type_, content=content, artifact_ids=artifact_ids or [], status=status)
+                             to_agent_id=to_agent, type=type_, content=content, artifact_ids=artifact_ids or [],
+                             status="pending" if needs_decision else status, needs_decision=needs_decision)
             s.add(m)
             s.flush()
             data = message_public(m)
         self.emit("agent.message", data, project_id, owner)
+        return data
+
+    def ask_decision(self, project_id: str, content: str, task_id: str | None = None, artifact_ids: list | None = None):
+        """Coordenador avisa o gestor de que uma decisão humana é necessária."""
+        with session_scope() as s:
+            p = s.get(Project, project_id)
+            coord = self.coordinator_for(s, p) if p else None
+        return self.message(project_id, "decisao", content, from_agent=coord.id if coord else None, from_kind="agent" if coord else "system",
+                            to_kind="user", task_id=task_id, artifact_ids=artifact_ids, needs_decision=True)
+
+    def resolve_decisions(self, project_id: str):
+        with session_scope() as s:
+            for m in s.scalars(select(AgentMessage).where(AgentMessage.project_id == project_id, AgentMessage.needs_decision.is_(True), AgentMessage.status == "pending")):
+                m.status = "processed"
+
+    def tool_call(self, *, project_id: str, task_id: str | None, agent_id: str | None, tool: str, input: str, output: str, status: str, latency_ms: int):
+        with session_scope() as s:
+            c = ToolCall(owner_id=self.owner_of(project_id), project_id=project_id, task_id=task_id, agent_id=agent_id, tool=tool,
+                         input=input[:2000], output=output[:4000], status=status, latency_ms=latency_ms)
+            s.add(c)
+            s.flush()
+            data = tool_call_public(c)
+        self.emit("tool.call", data, project_id)
         return data
 
     def project_event(self, project_id: str):
@@ -99,6 +132,9 @@ class Orchestrator:
             if p.status not in ("running", "revising"):
                 raise StopProject(p.status)
 
+    def _agent_limits(self, agent: Agent) -> dict:
+        return dict((agent.config or {}).get("limits") or {})
+
     async def llm(self, *, project_id: str | None, task_id: str | None, agent: Agent, purpose: str, messages: list[dict], json_mode: bool = False, max_tokens: int | None = None):
         cfg = agent.config or {}
         intel = cfg.get("intelligence", {})
@@ -115,6 +151,10 @@ class Orchestrator:
                     raise StopProject("calls")
         with session_scope() as s:
             key = CredentialService(s, owner_id=owner).resolve(provider, intel.get("credentialId"))
+        limits = self._agent_limits(agent)
+        retries = max(0, min(int(limits.get("maxRetries", settings.llm_max_retries)), settings.llm_max_retries))
+        call_timeout = float(limits.get("timeoutSec") or 120)
+        attempt = 0
         try:
             if not enabled:
                 raise LLMError(f"O provedor {provider} está desativado em Provedores e Custos. Ative-o ou troque o modelo do agente ({agent.name}).")
@@ -122,8 +162,28 @@ class Orchestrator:
                 raise MissingCredential(f"Nenhuma chave configurada para {provider}. Cadastre em Provedores e Custos → Chaves.")
             if not model:
                 raise LLMError(f"Nenhum modelo definido para {provider}. Abra Provedores e Custos → Atualizar lista de modelos e salve um modelo padrão.")
-            r = await get_gateway().complete(provider=provider, model=model, api_key=key, messages=messages, temperature=float(intel.get("temperature", 0.3)),
-                                             max_tokens=int(max_tokens or intel.get("maxOutputTokens", 2048)), json_mode=json_mode, purpose=purpose)
+            while True:
+                try:
+                    async with self.provider_slot(provider):
+                        r = await get_gateway().complete(provider=provider, model=model, api_key=key, messages=messages, temperature=float(intel.get("temperature", 0.3)),
+                                                         max_tokens=int(max_tokens or intel.get("maxOutputTokens", 2048)), json_mode=json_mode, purpose=purpose,
+                                                         timeout=call_timeout)
+                    break
+                except TransientLLMError as exc:
+                    if attempt >= retries:
+                        raise LLMError(f"{exc} — falhou após {attempt + 1} tentativa(s)") from exc
+                    attempt += 1
+                    wait = settings.llm_retry_base_sec * (2 ** (attempt - 1))
+                    with session_scope() as s:
+                        s.add(Execution(owner_id=owner, project_id=project_id, task_id=task_id, agent_id=agent.id, purpose=purpose, provider=provider, model=model,
+                                        status="retry", error=f"Tentativa {attempt}/{retries} em {wait:.0f}s: {str(exc)[:500]}"))
+                    self.emit("llm.retry", {"agentId": agent.id, "taskId": task_id, "attempt": attempt, "maxRetries": retries, "waitSec": wait, "error": str(exc)[:300]}, project_id, owner)
+                    await asyncio.sleep(wait)
+                    if project_id:
+                        with session_scope() as s:
+                            st = s.get(Project, project_id).status
+                        if st in ("paused", "cancelled"):
+                            raise StopProject(st)
         except LLMError as exc:
             with session_scope() as s:
                 s.add(Execution(owner_id=owner, project_id=project_id, task_id=task_id, agent_id=agent.id, purpose=purpose, provider=provider, model=model, status="error", error=str(exc)[:2000]))
@@ -205,7 +265,8 @@ class Orchestrator:
             p.status = "awaiting_approval"
             s.add(Approval(project_id=project_id, kind="plan"))
         self.agent_state(coord.id, "idle", project_id=project_id)
-        self.message(project_id, "solicitacao", f"Plano proposto com {len(tasks)} tarefas para '{title}'. Revise, ajuste e aprove para iniciar.", from_agent=coord.id, to_kind="user")
+        self.message(project_id, "solicitacao", f"Plano proposto com {len(tasks)} tarefas para '{title}'.", from_agent=coord.id, to_kind="user")
+        self.ask_decision(project_id, f"Plano de {len(tasks)} tarefas pronto para '{title}'. Revise, ajuste e aprove para iniciar a execução.")
         self.project_event(project_id)
 
     @staticmethod
@@ -288,11 +349,16 @@ class Orchestrator:
                 a.status = "approved" if approve else "changes_requested"
                 a.note, a.decided_at = note, utcnow()
             if approve:
-                for t in s.scalars(select(Task).where(Task.project_id == project_id, Task.status == "proposed")):
+                approved = []
+                for t in s.scalars(select(Task).where(Task.project_id == project_id, Task.status == "proposed").order_by(Task.position)):
                     t.status = "pending"
+                    approved.append({"key": t.key, "title": t.title, "kind": t.kind, "agentId": t.agent_id, "dependsOn": t.depends_on or [], "deliverable": t.deliverable})
+                # registro imutável do plano aprovado (o plano pode ganhar tarefas de revisão depois)
+                p.plan = {**(p.plan or {}), "plano_aprovado": {"aprovadoEm": utcnow().isoformat(), "nota": note, "tarefas": approved}}
                 p.status = "running"
             else:
                 p.status = "planning"
+        self.resolve_decisions(project_id)
         self.message(project_id, "aprovacao", ("Plano aprovado. " if approve else "Plano devolvido para ajustes. ") + note, from_kind="user", to_kind="agent")
         self.project_event(project_id)
         self.spawn(project_id, self.run(project_id) if approve else self.plan(project_id, note))
@@ -301,6 +367,7 @@ class Orchestrator:
     async def run(self, project_id: str):
         sem = asyncio.Semaphore(settings.task_concurrency)
         running: dict[str, asyncio.Task] = {}
+        announced: set[str] = set()  # agentes já sinalizados como "aguardando dependência"
 
         async def guarded(task_id: str):
             async with sem:
@@ -315,12 +382,27 @@ class Orchestrator:
                     tasks = list(s.scalars(select(Task).where(Task.project_id == project_id).order_by(Task.position)))
                     done = {t.key for t in tasks if t.status == "done"}
                     failed = {t.key for t in tasks if t.status in ("failed", "cancelled")}
-                    ready = [t.id for t in tasks if t.status == "pending" and t.id not in running and all(d in done for d in t.depends_on)]
-                    blocked = [t for t in tasks if t.status == "pending" and any(d in failed for d in t.depends_on)]
-                    for t in blocked:
-                        t.status = "cancelled"
-                        t.error = "Dependência falhou"
+                    ready_tasks = [t for t in tasks if t.status == "pending" and t.id not in running and all(d in done for d in t.depends_on)]
+                    ready = [t.id for t in ready_tasks]
+                    blocked = []
+                    while True:  # propaga o bloqueio por toda a cadeia de dependentes
+                        new = [t for t in tasks if t.status == "pending" and any(d in failed for d in t.depends_on)]
+                        if not new:
+                            break
+                        for t in new:
+                            t.status, t.error = "cancelled", "Dependência falhou"
+                            failed.add(t.key)
+                        blocked += new
+                    busy = {t.agent_id for t in tasks if t.status == "running"} | {t.agent_id for t in ready_tasks}
+                    waiting = [t for t in tasks if t.status == "pending" and t not in ready_tasks and t not in blocked and t.agent_id not in busy]
+                    for t in waiting:
+                        s.expunge(t)
                     remaining = [t for t in tasks if t.status in ("pending", "running")]
+                announced -= busy
+                for t in waiting:
+                    if t.agent_id and t.agent_id not in announced:
+                        announced.add(t.agent_id)
+                        self.agent_state(t.agent_id, "waiting", t, project_id=project_id)
                 for tid in ready:
                     running[tid] = asyncio.create_task(guarded(tid))
                 if not running and not ready:
@@ -337,6 +419,8 @@ class Orchestrator:
         finally:
             for t in running.values():
                 t.cancel()
+            if running:  # aguarda as tarefas registrarem o estado (pendente/cancelada) antes de sair
+                await asyncio.gather(*running.values(), return_exceptions=True)
 
     async def finish(self, project_id: str):
         with session_scope() as s:
@@ -354,8 +438,11 @@ class Orchestrator:
         self.project_event(project_id)
         if coord:
             self.message(project_id, "entrega" if rid else "alerta",
-                         "Documento final consolidado e revisado. Aguarda sua avaliação: aprove ou envie feedback." if rid else "O projeto terminou sem documento final.",
+                         "Documento final consolidado e revisado." if rid else "O projeto terminou sem documento final.",
                          from_agent=coord.id, to_kind="user", artifact_ids=[rid] if rid else [])
+        self.ask_decision(project_id, "Entrega pronta para avaliação: aprove o relatório ou envie feedback em Revisão." if rid else
+                          "O projeto terminou sem documento final. Decida: repetir as tarefas com falha, reanalisar o plano ou cancelar.",
+                          artifact_ids=[rid] if rid else [])
 
     def _task_ctx(self, project_id: str, task_id: str):
         with session_scope() as s:
@@ -376,10 +463,22 @@ class Orchestrator:
             for m in guidance_msgs:
                 m.status = "processed"
             guidance = "\n".join(f"Orientação do gestor: {m.content}" for m in guidance_msgs)
-            evs = list(s.scalars(select(Evidence).where(Evidence.project_id == project_id).order_by(Evidence.accessed_at)))
-            return t, p, a, inputs, guidance, evs
+            # contexto mínimo: evidências produzidas pelas dependências diretas + as citadas nos documentos recebidos
+            all_evs = list(s.scalars(select(Evidence).where(Evidence.project_id == project_id).order_by(Evidence.accessed_at)))
+            dep_ids = {d.id for d in dep_tasks}
+            cited = set(cited_codes("\n".join(c for _, _, c in inputs) + "\n" + (t.description or "")))
+            evs = [e for e in all_evs if e.task_id in dep_ids or e.code in cited]
+            tt = s.get(Task, task_id)
+            tt.context = {"inputs": [{"artifactId": art.id, "code": art.code, "title": art.title, "version": art.current_version, "fromTask": d.key} for d, art, _ in inputs],
+                          "evidence": [e.code for e in evs], "guidanceMessages": len(guidance_msgs)}
+            ctx = dict(tt.context)
+            for e in evs:
+                s.expunge(e)
+        self.emit("task.context", {"taskId": task_id, "agentId": a.id if a else None, **ctx}, project_id)
+        return t, p, a, inputs, guidance, evs
 
     def step(self, task: Task, agent_id: str, project_id: str, n: int, label: str, tokens: int = 0):
+        self.check_running(project_id)  # pausa/cancelamento entram em vigor no próximo passo
         with session_scope() as s:
             t = s.get(Task, task.id)
             t.steps_done, t.step = n, label
@@ -391,29 +490,52 @@ class Orchestrator:
         with session_scope() as s:
             tt = s.get(Task, task_id)
             tt.status, tt.started_at, tt.error, tt.steps_done = "running", utcnow(), "", 0
+            tt.attempts = (tt.attempts or 0) + 1
         self.agent_state(agent.id, "planning", t, project_id=project_id)
         system = {"role": "system", "content": P.agent_system(agent.config or {}, agent.name, agent.role)}
-        try:
+
+        async def work():
             self.check_running(project_id)
             if t.kind == "research":
-                art_id = await self._research(t, p, agent, system, guidance)
-            elif t.kind in ("analysis", "general"):
-                art_id = await self._analysis(t, p, agent, system, inputs, guidance)
-            elif t.kind == "writing":
-                art_id = await self._writing(t, p, agent, system, inputs, guidance)
-            elif t.kind == "review":
-                art_id = await self._review(t, p, agent, system)
-            else:
-                art_id = await self._revision(t, p, agent, system, guidance)
+                return await self._research(t, p, agent, system, guidance)
+            if t.kind in ("analysis", "general"):
+                return await self._analysis(t, p, agent, system, inputs, guidance, evs)
+            if t.kind == "writing":
+                return await self._writing(t, p, agent, system, inputs, guidance, evs)
+            if t.kind == "review":
+                return await self._review(t, p, agent, system)
+            return await self._revision(t, p, agent, system, guidance, inputs, evs)
+
+        try:
+            try:
+                art_id = await asyncio.wait_for(work(), timeout=settings.task_timeout_sec)
+            except asyncio.TimeoutError as exc:
+                raise RuntimeError(f"Tempo limite da tarefa excedido ({settings.task_timeout_sec}s)") from exc
+        except asyncio.CancelledError:
+            # cancelamento imediato (gestor cancelou/pausou): nada é perdido do que já foi registrado
+            with session_scope() as s:
+                tt = s.get(Task, task_id)
+                pp = s.get(Project, project_id)
+                if tt.status == "running":
+                    if pp.status == "cancelled":
+                        tt.status, tt.error, tt.finished_at = "cancelled", "Cancelada pelo gestor durante a execução", utcnow()
+                    else:
+                        tt.status = "pending"
+            self.agent_state(agent.id, "paused", t, project_id=project_id)
+            raise
         except StopProject as exc:
             reason = str(exc)
             with session_scope() as s:
                 tt = s.get(Task, task_id)
-                tt.status = "pending" if reason in ("paused", "cancelled") else "failed"
-                tt.error = {"budget": "Orçamento do projeto atingido", "calls": "Limite de chamadas de LLM atingido"}.get(reason, "")
+                if reason == "cancelled":
+                    tt.status, tt.error = "cancelled", "Cancelada pelo gestor"
+                else:
+                    tt.status = "pending" if reason == "paused" else "failed"
+                    tt.error = {"budget": "Orçamento do projeto atingido", "calls": "Limite de chamadas de LLM atingido"}.get(reason, "")
             if reason in ("budget", "calls"):
                 self.set_project(project_id, status="paused", error=f"Execução pausada: {'orçamento' if reason == 'budget' else 'limite de chamadas'} atingido. Aumente o limite para continuar.")
-                self.message(project_id, "alerta", "Limite de custo/chamadas atingido — execução pausada aguardando o gestor.", from_kind="system", to_kind="user")
+                self.ask_decision(project_id, f"Limite de {'orçamento' if reason == 'budget' else 'chamadas de LLM'} atingido — execução pausada. "
+                                  "Aumente o orçamento e retome, ou cancele o projeto.", task_id=t.id)
             self.agent_state(agent.id, "paused", t, project_id=project_id)
             raise
         except Exception as exc:  # falha real da tarefa (provedor, rede, JSON...)
@@ -423,6 +545,8 @@ class Orchestrator:
             self.agent_state(agent.id, "failed", t, project_id=project_id)
             self.message(project_id, "alerta", f"Falha em '{t.title}': {exc}", from_agent=agent.id, to_kind="user", task_id=t.id)
             self.emit("task.finished", {"agentId": agent.id, "taskId": t.id, "status": "failed", "title": t.title}, project_id)
+            self.ask_decision(project_id, f"A tarefa {t.key} “{t.title}” falhou e as tarefas dependentes não serão executadas. "
+                              "Decida: Repetir falhas, reatribuir via feedback na tarefa ou Reanalisar o plano.", task_id=t.id)
             return
         with session_scope() as s:
             tt = s.get(Task, task_id)
@@ -446,11 +570,12 @@ class Orchestrator:
                 art = s.get(Artifact, artifact_id)
                 art.current_version += 1
             else:
-                art = Artifact(project_id=project_id, task_id=task.id, agent_id=agent.id, title=title, kind=kind)
+                n = s.scalar(select(func.count()).select_from(Artifact).where(Artifact.project_id == project_id)) or 0
+                art = Artifact(project_id=project_id, task_id=task.id, agent_id=agent.id, title=title, kind=kind, code=f"D{n + 1}")
                 s.add(art)
                 s.flush()
             s.add(ArtifactVersion(artifact_id=art.id, version=art.current_version, content=content, agent_id=agent.id, note=note))
-            data = {"artifactId": art.id, "version": art.current_version, "title": art.title, "kind": art.kind, "agentId": agent.id}
+            data = {"artifactId": art.id, "code": art.code, "version": art.current_version, "title": art.title, "kind": art.kind, "agentId": agent.id, "taskId": task.id}
         self.emit("artifact.version", data, project_id)
         return data["artifactId"]
 
@@ -466,10 +591,24 @@ class Orchestrator:
         self.step(t, agent.id, p.id, 1, f"buscando fontes ({len(queries)} consultas)", r.input_tokens + r.output_tokens)
         self.agent_state(agent.id, "working", t, project_id=p.id)
         found = []
+        tools = get_tools()
+        errors = []
         for query in queries:
             self.check_running(p.id)
-            for src in await get_tools().search(query, limit=5, from_year=year):
-                found.append((query, src))
+            t0 = time.perf_counter()
+            try:
+                res = await tools.search(query, limit=5, from_year=year)
+            except Exception as exc:
+                errors.append(str(exc))
+                self.tool_call(project_id=p.id, task_id=t.id, agent_id=agent.id, tool="literature_search", input=query, output=str(exc), status="error",
+                               latency_ms=int((time.perf_counter() - t0) * 1000))
+                continue
+            self.tool_call(project_id=p.id, task_id=t.id, agent_id=agent.id, tool="literature_search", input=query + (f" (desde {year})" if year else ""),
+                           output="\n".join(f"[{x.source}] {x.title} ({x.year or 's.d.'})" for x in res) or "nenhum resultado", status="ok",
+                           latency_ms=int((time.perf_counter() - t0) * 1000))
+            found += [(query, src) for src in res]
+        if not found and errors:
+            raise RuntimeError("Fontes de pesquisa indisponíveis: " + "; ".join(errors)[:600])
         self.step(t, agent.id, p.id, 2, f"registrando {len(found)} evidências")
         new_evs = []
         with session_scope() as s:
@@ -484,38 +623,58 @@ class Orchestrator:
                 e = Evidence(project_id=p.id, task_id=t.id, agent_id=agent.id, code=f"E{n}", source=src.source, title=src.title, authors=", ".join(src.authors),
                              year=src.year, doi=src.doi, url=src.url, abstract=src.abstract, query=query)
                 s.add(e)
-                new_evs.append(e)
+                new_evs.append((e, src))
             s.flush()
+            new_ids = [(e.id, src) for e, src in new_evs]
+        self.emit("evidence", {"taskId": t.id, "count": len(new_ids), "agentId": agent.id}, p.id)
+        # verificação independente de cada referência (Crossref / arXiv)
+        verify = getattr(tools, "verify", None)
+        if settings.verify_references and verify and new_ids:
+            self.step(t, agent.id, p.id, 3, f"verificando {len(new_ids)} referências")
+            for eid, src in new_ids:
+                self.check_running(p.id)
+                t0 = time.perf_counter()
+                status, note = await verify(src)
+                with session_scope() as s:
+                    e = s.get(Evidence, eid)
+                    e.verification, e.verification_note = status, note
+                    code = e.code
+                self.tool_call(project_id=p.id, task_id=t.id, agent_id=agent.id, tool="reference_verify", input=f"{code}: {src.doi or src.url or src.title}",
+                               output=f"{status} — {note}", status="ok" if status != "pendente" else "error", latency_ms=int((time.perf_counter() - t0) * 1000))
+            self.emit("evidence", {"taskId": t.id, "count": 0, "agentId": agent.id, "verified": True}, p.id)
+        with session_scope() as s:
             evs = list(s.scalars(select(Evidence).where(Evidence.task_id == t.id)))
-        self.emit("evidence", {"taskId": t.id, "count": len(new_evs), "agentId": agent.id}, p.id)
-        self.message(p.id, "discussao", f"Encontrei {len(evs)} fontes para “{t.title}”.", from_agent=agent.id, to_kind="agent", task_id=t.id)
-        self.step(t, agent.id, p.id, 3, "redigindo achados")
+            for e in evs:
+                s.expunge(e)
+        ok = sum(e.verification == "verificada" for e in evs)
+        self.message(p.id, "discussao", f"Encontrei {len(evs)} fontes para “{t.title}” ({ok} verificadas de forma independente).", from_agent=agent.id, to_kind="agent", task_id=t.id)
+        self.step(t, agent.id, p.id, 4, "redigindo achados")
         r2 = await self.llm(project_id=p.id, task_id=t.id, agent=agent, purpose="findings",
                             messages=[system, {"role": "user", "content": P.findings_prompt(t.title, t.description, P.evidence_block(evs), guidance)}])
         return self._save_artifact(p.id, t, agent, f"Achados: {t.title}", "findings", r2.text, note=f"{len(evs)} fontes (resumos)")
 
-    async def _analysis(self, t, p, agent, system, inputs, guidance) -> str:
+    async def _analysis(self, t, p, agent, system, inputs, guidance, evs) -> str:
         self.step(t, agent.id, p.id, 0, "reunindo entregas")
         self.agent_state(agent.id, "working", t, project_id=p.id)
-        with session_scope() as s:
-            evs = list(s.scalars(select(Evidence).where(Evidence.project_id == p.id)))
         block = "\n\n".join(f"<documento autor=\"{a.title}\">\n{c[:6000]}\n</documento>" for _, a, c in inputs) or "(sem entregas anteriores)"
         self.step(t, agent.id, p.id, 1, "analisando")
         r = await self.llm(project_id=p.id, task_id=t.id, agent=agent, purpose="analysis",
                            messages=[system, {"role": "user", "content": P.analysis_prompt(t.title, t.description, block, P.evidence_block(evs), guidance)}])
         return self._save_artifact(p.id, t, agent, f"Análise: {t.title}", "analysis", r.text)
 
-    async def _writing(self, t, p, agent, system, inputs, guidance) -> str:
+    async def _writing(self, t, p, agent, system, inputs, guidance, evs) -> str:
         self.step(t, agent.id, p.id, 0, "reunindo entregas da equipe")
         self.agent_state(agent.id, "working", t, project_id=p.id)
-        with session_scope() as s:
-            evs = list(s.scalars(select(Evidence).where(Evidence.project_id == p.id)))
         block = "\n\n".join(f"<documento titulo=\"{a.title}\">\n{c[:7000]}\n</documento>" for _, a, c in inputs)
         self.step(t, agent.id, p.id, 1, "redigindo relatório")
         r = await self.llm(project_id=p.id, task_id=t.id, agent=agent, purpose="report", max_tokens=6000,
                            messages=[system, {"role": "user", "content": P.report_prompt(p.title, p.request, p.plan or {}, block, P.evidence_block(evs), guidance)}])
         self.step(t, agent.id, p.id, 2, "gerando referências a partir das evidências")
-        content, note = with_references(r.text, evs)
+        with session_scope() as s:  # citações de códigos fora do contexto ainda são resolvidas se existirem no projeto
+            proj_evs = list(s.scalars(select(Evidence).where(Evidence.project_id == p.id)))
+            for e in proj_evs:
+                s.expunge(e)
+        content, note = with_references(r.text, proj_evs)
         return self._save_artifact(p.id, t, agent, f"Relatório: {p.title}", "report", content, note=note)
 
     async def _review(self, t, p, agent, system) -> str:
@@ -527,15 +686,27 @@ class Orchestrator:
                 raise RuntimeError("Não há relatório para revisar")
             content = latest_version(s, report.id).content
             evs = list(s.scalars(select(Evidence).where(Evidence.project_id == p.id)))
+            for e in evs:
+                s.expunge(e)
             writer_id = report.agent_id
+        # o revisor recebe somente o relatório e as fontes que ele cita
+        cited = set(cited_codes(content))
+        scoped = [e for e in evs if e.code in cited]
+        with session_scope() as s:
+            s.get(Task, t.id).context = {"inputs": [{"artifactId": report.id, "code": report.code, "title": report.title, "version": report.current_version, "fromTask": None}],
+                                         "evidence": [e.code for e in scoped], "guidanceMessages": 0}
         self.step(t, agent.id, p.id, 1, "verificando evidências e citações")
         r = await self.llm(project_id=p.id, task_id=t.id, agent=agent, purpose="review", json_mode=True, max_tokens=2500,
-                           messages=[system, {"role": "user", "content": P.review_prompt(content, P.evidence_block(evs), (p.plan or {}).get("criterios_qualidade", []))}])
+                           messages=[system, {"role": "user", "content": P.review_prompt(content, P.evidence_block(scoped), (p.plan or {}).get("criterios_qualidade", []))}])
         rv = parse_json(r.text)
         bad = invalid_citations(content, evs)
         problems = rv.get("problemas") or []
         if bad:
             problems.append({"trecho": ", ".join(bad), "problema": "Citação de fonte inexistente", "sugestao": "Remover ou substituir por fonte registrada"})
+        unconfirmed = [e.code for e in scoped if e.verification in ("nao_confirmada", "divergente")]
+        if unconfirmed:
+            problems.append({"trecho": ", ".join(unconfirmed), "problema": "Referência sem confirmação independente (Crossref/arXiv)",
+                             "sugestao": "Conferir manualmente ou tratar a afirmação como não confirmada"})
         approved = bool(rv.get("aprovado")) and not bad
         md = [f"# Parecer de revisão — {'APROVADO' if approved else 'REVISÃO NECESSÁRIA'}", "", rv.get("resumo", ""), ""]
         if problems:
@@ -544,17 +715,23 @@ class Orchestrator:
             md += ["", "## Afirmações sem evidência suficiente", ""] + [f"- {x}" for x in rv["afirmacoes_sem_evidencia"]]
         art = self._save_artifact(p.id, t, agent, "Parecer de revisão", "review", "\n".join(md))
         self.message(p.id, "revisao", f"Revisão concluída: {'aprovado' if approved else f'{len(problems)} problema(s) a corrigir'}.", from_agent=agent.id, to_agent=writer_id, task_id=t.id, artifact_ids=[art, report.id])
+        exhausted = False
         with session_scope() as s:
             pp = s.get(Project, p.id)
-            if not approved and pp.auto_revisions < settings.max_auto_revisions and writer_id:
+            n = s.scalar(select(func.count()).select_from(Task).where(Task.project_id == p.id)) or 0
+            if not approved and pp.auto_revisions < settings.max_auto_revisions and writer_id and n < settings.max_total_tasks_per_project:
                 pp.auto_revisions += 1
-                n = s.scalar(select(func.count()).select_from(Task).where(Task.project_id == p.id)) or 0
                 req = "\n".join(f"- {x.get('problema')}: {x.get('sugestao')} (trecho: {x.get('trecho')})" for x in problems) + "\n" + "\n".join(f"- Fundamentar ou remover: {x}" for x in rv.get("afirmacoes_sem_evidencia") or [])
-                s.add(Task(project_id=p.id, key=f"RV{pp.auto_revisions}", title="Aplicar revisão do revisor", description=req, kind="revision", agent_id=writer_id,
+                s.add(Task(project_id=p.id, key=unique_key(s, p.id, "RV"), title="Aplicar revisão do revisor", description=req, kind="revision", agent_id=writer_id,
                            depends_on=[t.key], status="pending", steps_total=STEPS["revision"], target_artifact_id=report.id, position=n))
+            elif not approved:
+                exhausted = True
+        if exhausted:
+            self.ask_decision(p.id, f"O revisor ainda aponta {len(problems)} problema(s) e o limite de revisões automáticas foi atingido. "
+                              "Decida: aprovar assim mesmo, enviar feedback ao redator ou cancelar.", task_id=t.id, artifact_ids=[art, report.id])
         return art
 
-    async def _revision(self, t, p, agent, system, guidance) -> str:
+    async def _revision(self, t, p, agent, system, guidance, inputs=(), dep_evs=()) -> str:
         self.step(t, agent.id, p.id, 0, "lendo solicitações de revisão")
         self.agent_state(agent.id, "working", t, project_id=p.id)
         with session_scope() as s:
@@ -562,34 +739,161 @@ class Orchestrator:
             if not art:
                 raise RuntimeError("Artefato a revisar não encontrado")
             content = latest_version(s, art.id).content
-            evs = list(s.scalars(select(Evidence).where(Evidence.project_id == p.id)))
+            all_evs = list(s.scalars(select(Evidence).where(Evidence.project_id == p.id)))
+            # contexto: evidências do documento original (tarefa de origem) + citadas no documento + as das entradas atualizadas
+            origin = s.get(Task, art.task_id) if art.task_id else None
+            allowed = set((origin.context or {}).get("evidence", []) if origin else []) | set(cited_codes(content)) | {e.code for e in dep_evs}
+            if origin and origin.kind == "research":
+                allowed |= {e.code for e in all_evs if e.task_id == origin.id}
+            evs = [e for e in all_evs if e.code in allowed]
+            for e in all_evs:
+                s.expunge(e)
             art_id, art_kind = art.id, art.kind
-        body = content.split("\n## Referências")[0]
+            tt = s.get(Task, t.id)
+            tt.context = {**(tt.context or {}), "target": {"artifactId": art.id, "code": art.code, "title": art.title, "version": art.current_version},
+                          "evidence": sorted(allowed & {e.code for e in all_evs}, key=lambda c: int(c[1:]) if c[1:].isdigit() else 0)}
+        body = re.split(r"\n#{1,3}\s*Refer[êe]ncias", content)[0]
+        upd = "\n\n".join(f"<documento titulo=\"{a.title}\" versao=\"{a.current_version}\">\n{c[:6000]}\n</documento>" for _, a, c in inputs)
         self.step(t, agent.id, p.id, 1, "revisando documento")
         r = await self.llm(project_id=p.id, task_id=t.id, agent=agent, purpose="revision", max_tokens=6000,
-                           messages=[system, {"role": "user", "content": P.revision_prompt(body, (t.description + "\n" + guidance).strip(), P.evidence_block(evs))}])
+                           messages=[system, {"role": "user", "content": P.revision_prompt(body, (t.description + "\n" + guidance).strip(), P.evidence_block(evs), upd)}])
         self.step(t, agent.id, p.id, 2, "registrando nova versão")
-        new, note = (with_references(r.text, evs) if art_kind == "report" else (r.text, ""))
+        new, note = (with_references(r.text, all_evs) if art_kind == "report" else (r.text, ""))
         return self._save_artifact(p.id, t, agent, "", art_kind, new, note=f"Revisão: {t.title}. {note}".strip(), artifact_id=art_id)
 
     # ------------------------------------------------------------------ gestão humana
-    def feedback(self, project_id: str, artifact_id: str, text: str, agent_id: str | None = None):
+    def feedback(self, project_id: str, artifact_id: str | None, text: str, agent_id: str | None = None, task_id: str | None = None) -> dict:
+        """Feedback do gestor sobre um DOCUMENTO ou uma TAREFA.
+
+        1. Identifica o agente responsável (autor do documento / dono da tarefa, ou o indicado).
+        2. Cria a tarefa de revisão (FB#) — nova versão do documento, preservando as anteriores.
+        3. Propaga: documentos derivados (tarefas dependentes concluídas) ganham tarefas de atualização (UP#)
+           encadeadas pelas dependências; se havia revisão concluída, uma nova revisão (RR#) fecha o ciclo.
+        Tarefa sem documento (falhou/cancelada) é reaberta com o feedback como orientação.
+        """
+        created: list[str] = []
         with session_scope() as s:
             p = s.get(Project, project_id)
-            art = s.get(Artifact, artifact_id)
-            if not art or art.project_id != project_id:
-                raise ValueError("Artefato não encontrado")
-            target = agent_id or art.agent_id
+            if p.status in ("planning", "awaiting_approval"):
+                raise ValueError("Aprove o plano antes de enviar feedback sobre entregas.")
+            tasks = list(s.scalars(select(Task).where(Task.project_id == project_id).order_by(Task.position)))
+            by_key = {t.key: t for t in tasks}
+            origin: Task | None = None
+            art: Artifact | None = None
+            if task_id:
+                origin = s.get(Task, task_id)
+                if not origin or origin.project_id != project_id:
+                    raise ValueError("Tarefa não encontrada")
+                if origin.result_artifact_id:
+                    art = s.get(Artifact, origin.result_artifact_id)
+            elif artifact_id:
+                art = s.get(Artifact, artifact_id)
+                if not art or art.project_id != project_id:
+                    raise ValueError("Documento não encontrado")
+                origin = s.get(Task, art.task_id) if art.task_id else None
+            else:
+                raise ValueError("Selecione um documento ou uma tarefa")
+            if agent_id:
+                ag = s.get(Agent, agent_id)
+                if not ag or ag.owner_id != p.owner_id:
+                    raise ValueError("Agente não encontrado")
+            target = agent_id or (art.agent_id if art else None) or (origin.agent_id if origin else None)
             for a in s.scalars(select(Approval).where(Approval.project_id == project_id, Approval.kind == "delivery", Approval.status == "pending")):
                 a.status, a.note, a.decided_at = "changes_requested", text, utcnow()
-            n = s.scalar(select(func.count()).select_from(Task).where(Task.project_id == project_id)) or 0
-            s.add(Task(project_id=project_id, key=f"FB{n + 1}", title=f"Feedback do gestor em “{art.title}”", description=text, kind="revision", agent_id=target,
-                       depends_on=[], status="pending", steps_total=STEPS["revision"], target_artifact_id=artifact_id, position=n))
+            n = len(tasks)
+
+            if art is None:  # tarefa sem resultado: reabre com orientação (e libera as dependentes canceladas)
+                if origin.status not in ("failed", "cancelled", "pending"):
+                    raise ValueError("A tarefa ainda está em execução; aguarde ou pause o projeto.")
+                origin.status, origin.error, origin.steps_done, origin.step = "pending", "", 0, ""
+                origin.description = (origin.description + f"\n\nFeedback do gestor: {text}").strip()
+                if agent_id:
+                    origin.agent_id = agent_id
+                reopened = self._reopen_downstream(tasks, origin.key)
+                created = [origin.key] + reopened
+                fb_key = origin.key
+            else:
+                if n + 1 > settings.max_total_tasks_per_project:
+                    raise ValueError(f"Limite de {settings.max_total_tasks_per_project} tarefas do projeto atingido. Aumente AGENTSLAB_MAX_TOTAL_TASKS_PER_PROJECT ou crie um novo projeto.")
+                fb_key = unique_key(s, project_id, "FB")
+                s.add(Task(project_id=project_id, key=fb_key, title=f"Feedback do gestor em {art.code or ''} “{art.title}”".replace("  ", " "), description=text, kind="revision",
+                           agent_id=target, depends_on=[], status="pending", steps_total=STEPS["revision"], target_artifact_id=art.id, position=n))
+                s.flush()
+                created.append(fb_key)
+                n += 1
+                # propagação para documentos derivados
+                if origin:
+                    prev = {origin.key: fb_key}  # chave original → tarefa que produz a versão nova
+                    last_report_update = fb_key if art.kind == "report" else None
+                    review_done = None
+                    for d in self._downstream(tasks, origin.key):
+                        if d.kind == "review":
+                            review_done = review_done or (d if d.status == "done" else None)
+                            continue
+                        if d.status != "done" or not d.result_artifact_id or d.kind == "revision":
+                            continue
+                        ups = [prev[k] for k in d.depends_on if k in prev]
+                        if not ups:
+                            continue
+                        if n + 1 > settings.max_total_tasks_per_project:
+                            break
+                        darts = s.get(Artifact, d.result_artifact_id)
+                        k = unique_key(s, project_id, "UP")
+                        s.add(Task(project_id=project_id, key=k, title=f"Atualizar {darts.code} “{darts.title}” com a nova versão", kind="revision", agent_id=d.agent_id,
+                                   description=f"Um documento de entrada foi revisado após feedback do gestor: “{text[:600]}”. Incorpore as mudanças relevantes, "
+                                               "mantendo o que continua válido. Não invente dados nem referências.",
+                                   depends_on=ups, status="pending", steps_total=STEPS["revision"], target_artifact_id=darts.id, position=n))
+                        s.flush()
+                        n += 1
+                        prev[d.key] = k
+                        created.append(k)
+                        if darts.kind == "report":
+                            last_report_update = k
+                    if review_done is None:
+                        review_done = next((t for t in tasks if t.kind == "review" and t.status == "done"), None)
+                    if review_done and last_report_update and n + 1 <= settings.max_total_tasks_per_project:
+                        k = unique_key(s, project_id, "RR")
+                        s.add(Task(project_id=project_id, key=k, title="Nova revisão após feedback", description="Revisar a nova versão do relatório.", kind="review",
+                                   agent_id=review_done.agent_id, depends_on=[last_report_update], status="pending", steps_total=STEPS["review"], position=n))
+                        created.append(k)
             p.status, p.error = "revising", ""
-        self.message(project_id, "feedback", text, from_kind="user", to_agent=target, artifact_ids=[artifact_id])
+            p.auto_revisions = 0  # o novo ciclo pode ter uma revisão automática
+            art_ids = [art.id] if art else []
+            origin_id = origin.id if origin else None
+        self.resolve_decisions(project_id)
+        self.message(project_id, "feedback", text, from_kind="user", to_agent=target, task_id=origin_id, artifact_ids=art_ids)
+        if len(created) > 1:
+            self.message(project_id, "delegacao", f"Feedback encaminhado: {created[0]} para o responsável; {len(created) - 1} tarefa(s) dependente(s) serão atualizadas em sequência ({', '.join(created[1:])}).",
+                         from_agent=self._coord_id(project_id), to_kind="user", task_id=origin_id)
         self.project_event(project_id)
         if project_id not in self.runners:
             self.spawn(project_id, self.run(project_id))
+        return {"tasks": created, "agentId": target}
+
+    @staticmethod
+    def _downstream(tasks: list[Task], key: str) -> list[Task]:
+        """Tarefas que dependem (direta ou indiretamente) de `key`, na ordem do plano."""
+        hit = {key}
+        out = []
+        for t in sorted(tasks, key=lambda x: x.position):
+            if any(d in hit for d in (t.depends_on or [])):
+                hit.add(t.key)
+                out.append(t)
+        return out
+
+    def _reopen_downstream(self, tasks: list[Task], key: str) -> list[str]:
+        out = []
+        for t in self._downstream(tasks, key):
+            if t.status == "cancelled" and t.error == "Dependência falhou":
+                t.status, t.error = "pending", ""
+                out.append(t.key)
+        return out
+
+    def _coord_id(self, project_id: str) -> str | None:
+        with session_scope() as s:
+            p = s.get(Project, project_id)
+            c = self.coordinator_for(s, p) if p else None
+            return c.id if c else None
 
     def guidance(self, project_id: str, agent_id: str, text: str):
         with session_scope() as s:
@@ -610,6 +914,7 @@ class Orchestrator:
             for a in s.scalars(select(Approval).where(Approval.project_id == project_id, Approval.kind == "delivery", Approval.status == "pending")):
                 a.status, a.note, a.decided_at = ("approved" if approve else "rejected"), note, utcnow()
             p.status = "completed" if approve else "delivered"
+        self.resolve_decisions(project_id)
         self.message(project_id, "aprovacao", "Entrega aprovada pelo gestor." if approve else f"Entrega rejeitada: {note}", from_kind="user", to_kind="agent")
         self.project_event(project_id)
 
@@ -624,12 +929,20 @@ class Orchestrator:
                     if "Orçamento" in t.error or "Limite" in t.error:
                         t.status, t.error = "pending", ""
             elif action == "cancel":
+                if p.status in ("completed", "cancelled"):
+                    raise ValueError("Projeto já encerrado")
                 p.status = "cancelled"
                 for t in s.scalars(select(Task).where(Task.project_id == project_id, Task.status.in_(["pending", "proposed"]))):
-                    t.status = "cancelled"
+                    t.status, t.error = "cancelled", "Cancelada pelo gestor"
             else:
                 raise ValueError("Ação inválida para o estado atual")
             status = p.status
+        if status == "cancelled":  # cancelamento imediato: interrompe chamadas em andamento (histórico é preservado)
+            runner = self.runners.get(project_id)
+            if runner:
+                runner.cancel()
+        if action in ("resume", "cancel"):
+            self.resolve_decisions(project_id)
         self.project_event(project_id)
         if status == "running" and project_id not in self.runners:
             self.spawn(project_id, self.run(project_id))
@@ -708,6 +1021,7 @@ class Orchestrator:
             for a in s.scalars(select(Approval).where(Approval.project_id == project_id, Approval.status == "pending")):
                 a.status, a.decided_at, a.note = "superseded", utcnow(), "Projeto reanalisado"
             p.status, p.error = "planning", ""
+        self.resolve_decisions(project_id)
         txt = "Reanálise solicitada pelo gestor" + (f" com {provider}/{model or 'modelo padrão'} aplicado a {changed} agente(s)" if changed else "") + (f". {note}" if note else ".")
         self.message(project_id, "correcao", txt, from_kind="user", to_kind="agent")
         self.project_event(project_id)
@@ -727,6 +1041,7 @@ class Orchestrator:
             for t in again:
                 t.status, t.error, t.steps_done, t.step = "pending", "", 0, ""
             p.status, p.error = "running", ""
+        self.resolve_decisions(project_id)
         self.message(project_id, "correcao", f"Gestor pediu nova tentativa de {len(again)} tarefa(s).", from_kind="user", to_kind="agent")
         self.project_event(project_id)
         self.spawn(project_id, self.run(project_id))
@@ -744,6 +1059,18 @@ class Orchestrator:
 
 
 # ---------------------------------------------------------------------- helpers puros
+def unique_key(s, project_id: str, prefix: str) -> str:
+    keys = set(s.scalars(select(Task.key).where(Task.project_id == project_id)))
+    i = 1
+    while f"{prefix}{i}" in keys:
+        i += 1
+    return f"{prefix}{i}"
+
+
+VERIFICATION_LABEL = {"verificada": "referência verificada", "divergente": "ATENÇÃO: metadados divergentes na verificação",
+                      "nao_confirmada": "NÃO CONFIRMADA de forma independente", "pendente": "verificação pendente"}
+
+
 def latest_version(s, artifact_id: str) -> ArtifactVersion | None:
     return s.scalars(select(ArtifactVersion).where(ArtifactVersion.artifact_id == artifact_id).order_by(ArtifactVersion.version.desc())).first()
 
@@ -771,9 +1098,13 @@ def with_references(text: str, evs: list[Evidence]) -> tuple[str, str]:
         e = by.get(c)
         if e:
             loc = f"https://doi.org/{e.doi}" if e.doi else e.url
-            refs.append(f"- **[{c}]** {e.authors or 'Autoria não informada'} ({e.year or 's.d.'}). *{e.title}*. {loc} — fonte: {e.source}; consultado apenas o resumo.")
+            ver = getattr(e, "verification", "pendente") or "pendente"
+            mark = "✔" if ver == "verificada" else "⚠"
+            refs.append(f"- **[{c}]** {e.authors or 'Autoria não informada'} ({e.year or 's.d.'}). *{e.title}*. {loc} — fonte: {e.source}; consultado apenas o resumo. "
+                        f"{mark} {VERIFICATION_LABEL.get(ver, ver)}.")
     bad = invalid_citations(body, evs)
-    note = f"{len(refs)} referências verificadas" + (f"; citações inexistentes: {', '.join(bad)}" if bad else "")
+    ok = sum(1 for c in cited_codes(body) if c in by and by[c].verification == "verificada")
+    note = f"{len(refs)} referências ({ok} verificadas, {len(refs) - ok} não confirmadas)" + (f"; citações inexistentes: {', '.join(bad)}" if bad else "")
     return body + "\n\n## Referências\n\n" + ("\n".join(refs) or "_Nenhuma fonte citada._") + "\n", note
 
 
@@ -783,7 +1114,13 @@ def diff_versions(a: str, b: str) -> str:
 
 def message_public(m: AgentMessage) -> dict:
     return {"id": m.id, "projectId": m.project_id, "taskId": m.task_id, "fromKind": m.from_kind, "fromAgentId": m.from_agent_id, "toKind": m.to_kind,
-            "toAgentId": m.to_agent_id, "type": m.type, "content": m.content, "artifactIds": m.artifact_ids or [], "status": m.status, "createdAt": m.created_at.isoformat()}
+            "toAgentId": m.to_agent_id, "type": m.type, "content": m.content, "artifactIds": m.artifact_ids or [], "status": m.status,
+            "needsDecision": bool(m.needs_decision), "createdAt": m.created_at.isoformat()}
+
+
+def tool_call_public(c: ToolCall) -> dict:
+    return {"id": c.id, "projectId": c.project_id, "taskId": c.task_id, "agentId": c.agent_id, "tool": c.tool, "input": c.input, "output": c.output,
+            "status": c.status, "latencyMs": c.latency_ms, "createdAt": c.created_at.isoformat()}
 
 
 def execution_public(e: Execution) -> dict:

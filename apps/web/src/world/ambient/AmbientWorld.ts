@@ -150,11 +150,17 @@ export class AmbientWorld {
       a.emote = { key: 'exclaim', until: this.time + 3000 }
       this.events.feed?.(`${a.name} encontrou um erro na tarefa`, kind, a.id)
       this.setActivity(a, 'think', 2500)
+    } else if (op.state === 'waiting') {
+      // tem trabalho no projeto, mas depende de um colega: fica na estação aguardando a entrega
+      this.endSocial(a)
+      a.emote = { key: 'question', until: this.time + 2200 }
+      this.goToPoint(a, a.homePointId ?? this.findFreePoint(a, 'work')?.id ?? null, 'think', 1e9)
+      if (op.taskTitle) this.events.feed?.(`${a.name} aguarda dependência para: ${op.taskTitle}`, kind, a.id)
     } else if (op.state === 'paused') {
       this.endSocial(a)
       a.path = []
       this.setActivity(a, 'paused', 1e9)
-    } else if (op.state === 'idle' && (prev === 'paused' || BUSY_STATES.includes(prev))) {
+    } else if (op.state === 'idle' && (prev === 'paused' || prev === 'waiting' || BUSY_STATES.includes(prev))) {
       this.release(a)
       this.setActivity(a, 'idle', 600)
     }
@@ -267,6 +273,11 @@ export class AmbientWorld {
       else a.anim = this.animFor(a)
       return
     }
+    if (a.op.state === 'waiting') {
+      // aguardando dependência: permanece na estação (não sai para atividades ambientais)
+      if (a.pointId !== a.homePointId && !a.path.length && !a.delivery) this.goToPoint(a, a.homePointId ?? this.findFreePoint(a, 'work')?.id ?? null, 'think', 1e9)
+      return
+    }
     const p = a.personality
     const n = (v: number) => v / 100
     const weights: [string, number][] = [
@@ -316,7 +327,7 @@ export class AmbientWorld {
   // -------------------------------------------------------------------------
   private findChatPartner(a: Actor): Actor | null {
     const candidates = this.list().filter((b) => b.id !== a.id && !b.partnerId && !b.path.length && !b.intent &&
-      !BUSY_STATES.includes(b.op.state) && b.activity !== 'paused' && b.op.state !== 'collaborating')
+      !BUSY_STATES.includes(b.op.state) && b.activity !== 'paused' && b.op.state !== 'collaborating' && b.op.state !== 'waiting')
     if (!candidates.length) return null
     candidates.sort((x, y) => Math.hypot(x.x - a.x, x.y - a.y) - Math.hypot(y.x - a.x, y.y - a.y))
     const pool = candidates.slice(0, 3)

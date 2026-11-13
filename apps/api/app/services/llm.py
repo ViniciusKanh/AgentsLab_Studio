@@ -21,6 +21,20 @@ class MissingCredential(LLMError):
     pass
 
 
+class TransientLLMError(LLMError):
+    """Erro temporário do provedor (limite de taxa, indisponibilidade, timeout): pode ser repetido."""
+
+
+_TRANSIENT = ("ratelimit", "rate limit", "rate_limit", "429", "resource_exhausted", "resource has been exhausted", "quota exceeded per minute",
+              "serviceunavailable", "service unavailable", "503", "502", "500", "internalservererror", "overloaded", "timeout", "timed out",
+              "apiconnectionerror", "connection error")
+
+
+def is_transient(exc: Exception) -> bool:
+    low = f"{type(exc).__name__} {exc}".lower()
+    return any(k in low for k in _TRANSIENT)
+
+
 @dataclass
 class LLMResult:
     text: str
@@ -35,7 +49,7 @@ class LLMResult:
 
 class LLMGateway(Protocol):
     async def complete(self, *, provider: str, model: str, api_key: str | None, messages: list[dict],
-                       temperature: float = 0.3, max_tokens: int = 2048, json_mode: bool = False, purpose: str = "") -> LLMResult: ...
+                       temperature: float = 0.3, max_tokens: int = 2048, json_mode: bool = False, purpose: str = "", timeout: float = 120) -> LLMResult: ...
 
 
 def litellm_model(provider: str, model: str) -> str:
@@ -47,12 +61,12 @@ def litellm_model(provider: str, model: str) -> str:
 
 
 class LiteLLMGateway:
-    async def complete(self, *, provider, model, api_key, messages, temperature=0.3, max_tokens=2048, json_mode=False, purpose=""):
+    async def complete(self, *, provider, model, api_key, messages, temperature=0.3, max_tokens=2048, json_mode=False, purpose="", timeout=120):
         import litellm
 
         if provider != "ollama" and not api_key:
             raise MissingCredential(f"Nenhuma chave configurada para {provider}. Cadastre em Provedores e Custos → Chaves.")
-        kwargs: dict = dict(model=litellm_model(provider, model), messages=messages, temperature=temperature, max_tokens=max_tokens, timeout=120)
+        kwargs: dict = dict(model=litellm_model(provider, model), messages=messages, temperature=temperature, max_tokens=max_tokens, timeout=timeout)
         if api_key:
             kwargs["api_key"] = api_key
         if provider == "ollama":
@@ -68,6 +82,8 @@ class LiteLLMGateway:
                 raise LLMError(f"O modelo {provider}/{model} não está disponível para a sua chave (descontinuado ou inexistente). "
                                "Abra Provedores e Custos → Atualizar lista de modelos (mostra só os que funcionam) e depois use Reanalisar no projeto. "
                                f"Detalhe: {str(exc)[:300]}") from exc
+            if is_transient(exc):
+                raise TransientLLMError(f"{provider}/{model}: {exc}") from exc
             raise LLMError(f"{provider}/{model}: {exc}") from exc
         latency = int((time.perf_counter() - t0) * 1000)
         text = resp.choices[0].message.content or ""

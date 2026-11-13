@@ -31,6 +31,29 @@ class Source:
 class ResearchTools(Protocol):
     async def search(self, query: str, limit: int = 5, from_year: int | None = None) -> list[Source]: ...
 
+    async def verify(self, src: Source) -> tuple[str, str]:
+        """Confirma a referência numa base independente. Retorna (situação, nota):
+        verificada | divergente | nao_confirmada | pendente (falha de rede — tentar depois)."""
+        ...
+
+
+def _norm(t: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", (t or "").lower()))
+
+
+def titles_match(a: str, b: str) -> bool:
+    from difflib import SequenceMatcher
+
+    na, nb = _norm(a), _norm(b)
+    if not na or not nb:
+        return False
+    return na == nb or na in nb or nb in na or SequenceMatcher(None, na, nb).ratio() >= 0.85
+
+
+def arxiv_id(url: str) -> str:
+    m = re.search(r"arxiv\.org/abs/([\w.\-/]+?)(v\d+)?$", url or "")
+    return m.group(1) if m else ""
+
 
 def _openalex_abstract(inv: dict | None) -> str:
     if not inv:
@@ -74,6 +97,32 @@ class WebResearchTools:
             out.append(Source("arxiv", title, [a.findtext("a:name", "", ns) for a in e.findall("a:author", ns)][:6],
                               int(year) if year.isdigit() else None, doi, e.findtext("a:id", "", ns) or "", " ".join((e.findtext("a:summary", "", ns) or "").split())[:2500]))
         return out
+
+    async def verify(self, src: Source) -> tuple[str, str]:
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout, headers=UA, follow_redirects=True) as c:
+                if src.doi:
+                    r = await c.get(f"https://api.crossref.org/works/{src.doi}")
+                    if r.status_code == 404:
+                        return "nao_confirmada", f"DOI {src.doi} não encontrado no Crossref"
+                    r.raise_for_status()
+                    titles = (r.json().get("message") or {}).get("title") or [""]
+                    if titles_match(src.title, titles[0]):
+                        return "verificada", f"DOI {src.doi} confirmado no Crossref"
+                    return "divergente", f"DOI existe no Crossref, mas o título diverge: “{titles[0][:160]}”"
+                aid = arxiv_id(src.url)
+                if aid:
+                    r = await c.get(f"https://export.arxiv.org/api/query?id_list={aid}")
+                    r.raise_for_status()
+                    ns = {"a": "http://www.w3.org/2005/Atom"}
+                    e = ET.fromstring(r.text).find("a:entry", ns)
+                    title = " ".join((e.findtext("a:title", "", ns) if e is not None else "").split())
+                    if title and titles_match(src.title, title):
+                        return "verificada", f"arXiv:{aid} confirmado"
+                    return "nao_confirmada", f"arXiv:{aid} não confirmado"
+        except Exception as exc:  # rede/serviço fora do ar: fica pendente, não é marcado como válido
+            return "pendente", f"Verificação indisponível: {str(exc)[:200]}"
+        return "nao_confirmada", "Sem DOI ou identificador arXiv para confirmar"
 
     async def search(self, query, limit=5, from_year=None):
         results: list[Source] = []

@@ -57,6 +57,7 @@ def evidence_block(evs: list) -> str:
     for e in evs:
         parts.append(
             f"<fonte codigo=\"{e.code}\">\nTítulo: {e.title}\nAutores: {e.authors or 'n/d'}\nAno: {e.year or 'n/d'}\nDOI: {e.doi or 'n/d'}\n"
+            f"Verificação independente: {getattr(e, 'verification', 'pendente') or 'pendente'}\n"
             f"Resumo (apenas resumo, texto completo NÃO consultado): {e.abstract[:1200] or 'sem resumo disponível'}\n</fonte>"
         )
     return "\n".join(parts) or "(nenhuma fonte encontrada)"
@@ -119,11 +120,12 @@ Responda SOMENTE com JSON:
 {{"aprovado": true/false, "resumo": "...", "problemas": [{{"trecho": "...", "problema": "...", "sugestao": "..."}}], "afirmacoes_sem_evidencia": ["..."]}}"""
 
 
-def revision_prompt(report: str, requests: str, evidence: str) -> str:
+def revision_prompt(report: str, requests: str, evidence: str, updated_inputs: str = "") -> str:
+    upd = f"\nDocumentos de entrada atualizados (use-os para atualizar o documento):\n{updated_inputs}\n" if updated_inputs else ""
     return f"""Revise o documento abaixo aplicando as solicitações. Preserve o que está correto, mantenha a estrutura e as citações [E#] válidas.
 Solicitações de revisão:
 {requests}
-
+{upd}
 <documento>
 {report[:14000]}
 </documento>

@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session
 from app.auth import CurrentUser
 from app.db import get_db
 from app.deps import user
-from app.models import Organization, AgentMessage, Approval, Artifact, ArtifactVersion, Evidence, Execution, Project, Task
-from app.services.orchestrator import diff_versions, execution_public, message_public, orchestrator
+from app.models import Agent, Organization, AgentMessage, Approval, Artifact, ArtifactVersion, Evidence, Execution, Project, Task, ToolCall
+from app.services.orchestrator import diff_versions, execution_public, message_public, orchestrator, tool_call_public
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
 
@@ -20,6 +20,7 @@ def task_public(t: Task) -> dict:
     return {"id": t.id, "key": t.key, "title": t.title, "description": t.description, "kind": t.kind, "agentId": t.agent_id, "dependsOn": t.depends_on or [],
             "deliverable": t.deliverable, "status": t.status, "step": t.step, "stepsDone": t.steps_done, "stepsTotal": t.steps_total,
             "resultArtifactId": t.result_artifact_id, "targetArtifactId": t.target_artifact_id, "error": t.error, "position": t.position,
+            "context": t.context or {}, "attempts": t.attempts or 0,
             "startedAt": t.started_at.isoformat() if t.started_at else None, "finishedAt": t.finished_at.isoformat() if t.finished_at else None}
 
 
@@ -174,7 +175,9 @@ def budget(pid: str, body: BudgetIn, db: Session = Depends(get_db), u: CurrentUs
 
 
 class FeedbackIn(BaseModel):
-    artifactId: str
+    """Feedback sobre um documento (artifactId) OU uma tarefa (taskId)."""
+    artifactId: str | None = None
+    taskId: str | None = None
     text: str = Field(min_length=3, max_length=8000)
     agentId: str | None = None
 
@@ -182,9 +185,11 @@ class FeedbackIn(BaseModel):
 @router.post("/{pid}/feedback")
 async def feedback(pid: str, body: FeedbackIn, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
     get_project(pid, db, u)
-    _wrap(orchestrator.feedback, pid, body.artifactId, body.text, body.agentId)
+    if not body.artifactId and not body.taskId:
+        raise HTTPException(422, "Informe o documento ou a tarefa")
+    routed = _wrap(orchestrator.feedback, pid, body.artifactId, body.text, body.agentId, body.taskId)
     db.expire_all()
-    return project_public(get_project(pid, db, u), db, full=True)
+    return {**project_public(get_project(pid, db, u), db, full=True), "feedback": routed}
 
 
 class GuidanceIn(BaseModel):
@@ -213,13 +218,36 @@ def messages(pid: str, db: Session = Depends(get_db), u: CurrentUser = Depends(u
 @router.get("/{pid}/artifacts")
 def artifacts(pid: str, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
     get_project(pid, db, u)
+    p = get_project(pid, db, u)
     out = []
     for a in db.scalars(select(Artifact).where(Artifact.project_id == pid).order_by(Artifact.created_at)):
         vs = list(db.scalars(select(ArtifactVersion).where(ArtifactVersion.artifact_id == a.id).order_by(ArtifactVersion.version)))
-        out.append({"id": a.id, "title": a.title, "kind": a.kind, "agentId": a.agent_id, "taskId": a.task_id, "currentVersion": a.current_version,
-                    "createdAt": a.created_at.isoformat(),
+        meta = _metadata(db, p, a, vs[-1] if vs else None)
+        out.append({"id": a.id, "code": a.code, "title": a.title, "kind": a.kind, "agentId": a.agent_id, "taskId": a.task_id, "currentVersion": a.current_version,
+                    "createdAt": a.created_at.isoformat(), "updatedAt": vs[-1].created_at.isoformat() if vs else a.created_at.isoformat(), "metadata": meta,
                     "versions": [{"version": v.version, "agentId": v.agent_id, "note": v.note, "createdAt": v.created_at.isoformat(), "chars": len(v.content)} for v in vs]})
     return out
+
+
+KIND_LABEL = {"findings": "Achados de pesquisa", "analysis": "Análise técnica", "report": "Relatório consolidado", "review": "Parecer de revisão"}
+
+
+def _metadata(db: Session, p: Project, a: Artifact, v: ArtifactVersion | None) -> dict:
+    """Identificação do documento: código, autoria, versão, data, projeto e tarefa de origem."""
+    author = db.get(Agent, a.agent_id) if a.agent_id else None
+    editor = db.get(Agent, v.agent_id) if v and v.agent_id else None
+    task = db.get(Task, a.task_id) if a.task_id else None
+    return {"code": a.code, "type": KIND_LABEL.get(a.kind, a.kind), "author": author.name if author else "—", "authorRole": author.role if author else "",
+            "lastEditor": editor.name if editor else (author.name if author else "—"), "version": v.version if v else a.current_version,
+            "date": (v.created_at if v else a.created_at).isoformat(), "project": p.title, "projectId": p.id,
+            "originTask": f"{task.key} — {task.title}" if task else "—", "originTaskId": a.task_id}
+
+
+def _header(meta: dict) -> str:
+    return ("---\n" + "\n".join(f"{k}: {v}" for k, v in [("documento", meta["code"]), ("tipo", meta["type"]), ("autor", f"{meta['author']} ({meta['authorRole']})"),
+                                                         ("ultima_edicao_por", meta["lastEditor"]), ("versao", meta["version"]), ("data", meta["date"]),
+                                                         ("projeto", meta["project"]), ("tarefa_de_origem", meta["originTask"]),
+                                                         ("gerado_por", "AgentsLab_Studio — conteúdo produzido por agentes de IA; revise antes de usar")]) + "\n---\n\n")
 
 
 def _version(db: Session, aid: str, version: int | None, pid: str | None = None) -> ArtifactVersion:
@@ -236,9 +264,10 @@ def _version(db: Session, aid: str, version: int | None, pid: str | None = None)
 
 @router.get("/{pid}/artifacts/{aid}")
 def artifact_content(pid: str, aid: str, version: int | None = None, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
-    get_project(pid, db, u)
+    p = get_project(pid, db, u)
     v = _version(db, aid, version, pid)
-    return {"artifactId": aid, "version": v.version, "content": v.content, "note": v.note, "agentId": v.agent_id, "createdAt": v.created_at.isoformat()}
+    return {"artifactId": aid, "version": v.version, "content": v.content, "note": v.note, "agentId": v.agent_id, "createdAt": v.created_at.isoformat(),
+            "metadata": _metadata(db, p, db.get(Artifact, aid), v)}
 
 
 @router.get("/{pid}/artifacts/{aid}/diff")
@@ -249,17 +278,18 @@ def artifact_diff(pid: str, aid: str, a: int, b: int, db: Session = Depends(get_
 
 @router.get("/{pid}/artifacts/{aid}/download", response_class=PlainTextResponse)
 def download(pid: str, aid: str, version: int | None = None, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
-    get_project(pid, db, u)
+    p = get_project(pid, db, u)
     art = db.get(Artifact, aid)
     if not art:
         raise HTTPException(404, "Documento não encontrado")
     v = _version(db, aid, version, pid)
+    content = _header(_metadata(db, p, art, v)) + v.content
     import unicodedata
     from urllib.parse import quote
 
     ascii_title = unicodedata.normalize("NFKD", art.title).encode("ascii", "ignore").decode()
     name = "".join(c if c.isalnum() else "_" for c in ascii_title)[:60] or "documento"
-    return PlainTextResponse(v.content, media_type="text/markdown; charset=utf-8",
+    return PlainTextResponse(content, media_type="text/markdown; charset=utf-8",
                              headers={"Content-Disposition": f'attachment; filename="{name}_v{v.version}.md"; filename*=UTF-8\'\'{quote(art.title[:60])}_v{v.version}.md'})
 
 
@@ -267,7 +297,7 @@ def download(pid: str, aid: str, version: int | None = None, db: Session = Depen
 def evidence(pid: str, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
     get_project(pid, db, u)
     return [{"id": e.id, "code": e.code, "source": e.source, "title": e.title, "authors": e.authors, "year": e.year, "doi": e.doi, "url": e.url,
-             "abstract": e.abstract, "fullText": e.full_text, "query": e.query, "taskId": e.task_id, "agentId": e.agent_id, "accessedAt": e.accessed_at.isoformat()}
+             "abstract": e.abstract, "fullText": e.full_text, "query": e.query, "verification": e.verification, "verificationNote": e.verification_note, "taskId": e.task_id, "agentId": e.agent_id, "accessedAt": e.accessed_at.isoformat()}
             for e in db.scalars(select(Evidence).where(Evidence.project_id == pid).order_by(Evidence.accessed_at))]
 
 
@@ -275,3 +305,9 @@ def evidence(pid: str, db: Session = Depends(get_db), u: CurrentUser = Depends(u
 def executions(pid: str, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
     get_project(pid, db, u)
     return [execution_public(e) for e in db.scalars(select(Execution).where(Execution.project_id == pid).order_by(Execution.created_at))]
+
+
+@router.get("/{pid}/tool-calls")
+def tool_calls(pid: str, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    get_project(pid, db, u)
+    return [tool_call_public(c) for c in db.scalars(select(ToolCall).where(ToolCall.project_id == pid).order_by(ToolCall.created_at))]

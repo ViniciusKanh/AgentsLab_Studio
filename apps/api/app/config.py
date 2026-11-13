@@ -28,6 +28,17 @@ class Settings(BaseSettings):
     max_llm_calls_per_project: int = 60
     max_auto_revisions: int = 1
     task_concurrency: int = 3
+    # chamadas simultâneas por provedor (respeita limites de requisição — ex.: plano gratuito do Gemini)
+    provider_concurrency: int = 2
+    # retentativas em erros transitórios (429, 5xx, timeout); o agente pode reduzir em limits.maxRetries
+    llm_max_retries: int = 2
+    llm_retry_base_sec: float = 4.0
+    # tempo máximo de uma tarefa inteira (todas as chamadas e ferramentas)
+    task_timeout_sec: int = 900
+    # teto de tarefas do projeto incluindo revisões, feedbacks e propagações (evita delegação sem fim)
+    max_total_tasks_per_project: int = 30
+    # verificação independente de referências (Crossref / arXiv)
+    verify_references: bool = True
     seed_demo_organizations: bool = True
     # Autenticação (Supabase Auth). Sem supabase_url/jwt_secret → modo local de usuário único (desktop).
     supabase_url: str = ""

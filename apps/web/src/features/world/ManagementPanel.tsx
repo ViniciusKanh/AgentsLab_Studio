@@ -7,7 +7,7 @@ import { platform, PROJECT_STATUS } from '@/services/platform'
 import { appConfig } from '@/services/config'
 import { onPlatformEvent } from '@/services/realtime'
 import type { Project } from '@/types/platform'
-import { STATE_META } from '@/simulation/states'
+import { activityLabel, STATE_META } from '@/simulation/states'
 import { worldBus } from '@/world/events/bus'
 import { Avatar, Chip } from '@/components/ui/primitives'
 
@@ -35,7 +35,7 @@ export function ManagementPanel({ envId, onAssign }: { envId: string; onAssign: 
               <li key={a.id} className="flex items-center gap-2 rounded-[5px] p-1.5 hover:bg-white/5">
                 <button className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => select(a.id)}>
                   <Avatar characterId={a.appearance.characterId} size={28} ring={m.color} />
-                  <span className="min-w-0"><b className="block truncate text-[11.5px]">{a.name}</b><span className="text-[10px]" style={{ color: m.color }}>{a.status === 'paused' ? 'Pausado' : m.label}</span></span>
+                  <span className="min-w-0"><b className="block truncate text-[11.5px]">{a.name}</b><span className="text-[10px]" style={{ color: m.color }}>{a.status === 'paused' ? 'Pausado' : activityLabel(runtime[a.id]?.state ?? 'idle', runtime[a.id]?.taskKind)}</span></span>
                 </button>
                 <button className="text-lab-muted hover:text-neon-cyan" onClick={() => { select(a.id); worldBus.emit('camera:focus', { agentId: a.id }) }} aria-label={`Centralizar ${a.name}`}><Crosshair size={14} /></button>
                 <button className="text-lab-muted hover:text-neon-green disabled:opacity-30" onClick={() => onAssign(a.id)} disabled={appConfig.mode !== 'real'} aria-label={`Atribuir tarefa a ${a.name}`} title="Atribuir tarefa"><Briefcase size={14} /></button>

@@ -44,6 +44,8 @@ export const useSimulationStore = create<SimState>((set, get) => ({
           ...prev, state: e.state, since: e.ts,
           taskId: e.taskId ?? (e.state === 'idle' ? null : prev.taskId),
           taskTitle: e.taskTitle ?? (e.state === 'idle' ? null : prev.taskTitle),
+          taskKind: e.taskKind ?? (e.state === 'idle' ? null : prev.taskKind ?? null),
+          projectId: e.projectId ?? (e.state === 'idle' ? null : prev.projectId ?? null),
           partnerId: e.state === 'collaborating' ? e.partnerId ?? null : null,
           progress: e.state === 'planning' ? 0 : e.state === 'idle' ? 0 : prev.progress,
         }

@@ -105,6 +105,9 @@ class Task(Base):
     result_artifact_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
     error: Mapped[str] = mapped_column(Text, default="")
     position: Mapped[int] = mapped_column(Integer, default=0)
+    # contexto entregue ao agente (documentos/versões e evidências) — rastreabilidade
+    context: Mapped[dict] = mapped_column(JSON, default=dict)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -124,6 +127,8 @@ class AgentMessage(Base):
     content: Mapped[str] = mapped_column(Text)
     artifact_ids: Mapped[list] = mapped_column(JSON, default=list)
     status: Mapped[str] = mapped_column(String(12), default="processed")  # pending | processed
+    # mensagem do coordenador que pede uma decisão humana
+    needs_decision: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
@@ -133,6 +138,8 @@ class Artifact(Base):
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
     task_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
     agent_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # identificação legível no projeto (D1, D2...)
+    code: Mapped[str] = mapped_column(String(20), default="")
     title: Mapped[str] = mapped_column(String(200))
     kind: Mapped[str] = mapped_column(String(20))  # findings | analysis | report | review
     current_version: Mapped[int] = mapped_column(Integer, default=1)
@@ -165,6 +172,9 @@ class Evidence(Base):
     url: Mapped[str] = mapped_column(Text, default="")
     abstract: Mapped[str] = mapped_column(Text, default="")
     full_text: Mapped[bool] = mapped_column(Boolean, default=False)
+    # verificação independente da referência: verificada | nao_confirmada | divergente | pendente
+    verification: Mapped[str] = mapped_column(String(20), default="pendente")
+    verification_note: Mapped[str] = mapped_column(Text, default="")
     query: Mapped[str] = mapped_column(Text, default="")
     accessed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
@@ -186,6 +196,22 @@ class Execution(Base):
     latency_ms: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(12), default="ok")
     error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class ToolCall(Base):
+    """Uso de ferramenta por um agente (busca, verificação de referência...)."""
+    __tablename__ = "tool_calls"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: uid("tool"))
+    owner_id: Mapped[str] = mapped_column(String(64), default="local", index=True)
+    project_id: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    task_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    agent_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    tool: Mapped[str] = mapped_column(String(40))
+    input: Mapped[str] = mapped_column(Text, default="")
+    output: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(12), default="ok")
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
