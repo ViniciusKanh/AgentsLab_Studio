@@ -3,7 +3,7 @@ Teste obrigatório: "Pesquisa sobre aplicações de IA na aeronáutica" — flux
 LLM e ferramentas são substitutos determinísticos (apenas aqui); o fluxo, a persistência,
 as dependências, mensagens, evidências, versões e custos são os do sistema real.
 """
-from conftest import wait_for
+from conftest import agent_id, org_id, wait_for
 
 API = "/api/v1"
 
@@ -15,7 +15,7 @@ def status(client, pid):
 def test_fluxo_completo_aeronautica(client, env):
     client.post(f"{API}/credentials", json={"provider": "gemini", "alias": "Gemini pessoal", "api_key": "AIza-TESTE-0001"})
     # 1-2. Projeto por prompt → coordenador interpreta
-    r = client.post(f"{API}/projects", json={"organizationId": "org-pesquisa-ia", "title": "IA na aeronáutica",
+    r = client.post(f"{API}/projects", json={"organizationId": org_id(client), "title": "IA na aeronáutica",
                                              "request": "Pesquise aplicações de inteligência artificial na aeronáutica e entregue um relatório técnico com fontes."})
     assert r.status_code == 201
     pid = r.json()["id"]
@@ -36,7 +36,7 @@ def test_fluxo_completo_aeronautica(client, env):
     msgs = client.get(f"{API}/projects/{pid}/messages").json()
     types = {m["type"] for m in msgs}
     assert {"solicitacao", "aprovacao", "entrega", "revisao"} <= types
-    assert any(m["type"] == "entrega" and m["fromAgentId"] == "ag-pesq-cientifico" and m["toAgentId"] == "ag-analista-tec" for m in msgs)
+    assert any(m["type"] == "entrega" and m["fromAgentId"] == agent_id(client, "Pesquisador Científico") and m["toAgentId"] == agent_id(client, "Analista Técnico") for m in msgs)
     # evidências reais registradas, sem duplicatas
     evs = client.get(f"{API}/projects/{pid}/evidence").json()
     assert [e["code"] for e in evs] == ["E1", "E2"] and evs[0]["doi"] == "10.1000/abc" and not evs[0]["fullText"]
@@ -68,13 +68,13 @@ def test_fluxo_completo_aeronautica(client, env):
     final = status(client, pid)
     assert final["llmCalls"] == len(exes) and abs(final["costUsd"] - 0.001 * len(exes)) < 1e-9
     usage = client.get(f"{API}/usage").json()
-    assert any(u["key"] == "ag-redator" for u in usage["byAgent"])
+    assert any(u["key"] == agent_id(client, "Redator Técnico-Científico") for u in usage["byAgent"])
     ov = client.get(f"{API}/overview").json()
     assert ov["projects"]["completed"] == 1 and ov["llmCalls"] == len(exes)
 
 
 def test_sem_credencial_falha_com_mensagem_clara(client):
-    pid = client.post(f"{API}/projects", json={"organizationId": "org-pesquisa-ia", "request": "Pesquise aplicações de IA em satélites de observação."}).json()["id"]
+    pid = client.post(f"{API}/projects", json={"organizationId": org_id(client), "request": "Pesquise aplicações de IA em satélites de observação."}).json()["id"]
     p = wait_for(lambda: (d := status(client, pid))["status"] == "failed" and d)
     assert "Nenhuma chave" in p["error"]
     exes = client.get(f"{API}/projects/{pid}/executions").json()
@@ -83,7 +83,7 @@ def test_sem_credencial_falha_com_mensagem_clara(client):
 
 def test_limite_de_orcamento_pausa(client):
     client.post(f"{API}/credentials", json={"provider": "gemini", "alias": "Gemini pessoal", "api_key": "AIza-TESTE-0001"})
-    pid = client.post(f"{API}/projects", json={"organizationId": "org-pesquisa-ia", "request": "Pesquise aplicações de IA na aeronáutica com orçamento mínimo.",
+    pid = client.post(f"{API}/projects", json={"organizationId": org_id(client), "request": "Pesquise aplicações de IA na aeronáutica com orçamento mínimo.",
                                                "budgetUsd": 0.0025}).json()["id"]
     wait_for(lambda: status(client, pid)["status"] == "awaiting_approval")
     client.post(f"{API}/projects/{pid}/plan/decision", json={"approve": True})
@@ -94,7 +94,7 @@ def test_limite_de_orcamento_pausa(client):
 
 def test_controle_cancelar(client):
     client.post(f"{API}/credentials", json={"provider": "gemini", "alias": "Gemini pessoal", "api_key": "AIza-TESTE-0001"})
-    pid = client.post(f"{API}/projects", json={"organizationId": "org-pesquisa-ia", "request": "Pesquise aplicações de IA na aeronáutica para cancelar."}).json()["id"]
+    pid = client.post(f"{API}/projects", json={"organizationId": org_id(client), "request": "Pesquise aplicações de IA na aeronáutica para cancelar."}).json()["id"]
     wait_for(lambda: status(client, pid)["status"] == "awaiting_approval")
     assert client.post(f"{API}/projects/{pid}/control", json={"action": "cancel"}).json()["status"] == "cancelled"
     assert client.post(f"{API}/projects/{pid}/plan/decision", json={"approve": True}).status_code == 409
@@ -102,9 +102,9 @@ def test_controle_cancelar(client):
 
 def test_chat_real_e_tarefa_avulsa(client):
     client.post(f"{API}/credentials", json={"provider": "gemini", "alias": "Gemini pessoal", "api_key": "AIza-TESTE-0001"})
-    r = client.post(f"{API}/agents/ag-financeiro/chat", json={"text": "Olá"})
+    r = client.post(f"{API}/agents/{agent_id(client, 'Analista Financeiro')}/chat", json={"text": "Olá"})
     assert r.status_code == 200 and r.json()["reply"]
-    pid = client.post(f"{API}/agents/ag-administrativo/tasks", json={"title": "Checklist de onboarding", "description": "Para novos colaboradores"}).json()["projectId"]
+    pid = client.post(f"{API}/agents/{agent_id(client, 'Assistente Administrativo')}/tasks", json={"title": "Checklist de onboarding", "description": "Para novos colaboradores"}).json()["projectId"]
     p = wait_for(lambda: (d := status(client, pid))["status"] == "delivered" and d)
     assert p["tasks"][0]["status"] == "done"
 
@@ -118,3 +118,36 @@ def test_crud_organizacao_e_agente(client):
     ag2 = client.put(f"{API}/agents/{ag['id']}", json={"name": "Dev Backend Sênior"}).json()
     assert ag2["name"] == "Dev Backend Sênior" and ag2["intelligence"]["model"] == "llama-3.3-70b-versatile"
     assert client.post(f"{API}/agents", json={"name": "x", "role": ""}).status_code == 422
+
+
+def test_reanalisar_apos_trocar_modelo_e_repetir_tarefas(client, env):
+    # sem chave → planejamento falha (como o 404 de modelo descontinuado)
+    pid = client.post(f"{API}/projects", json={"organizationId": org_id(client), "request": "Pesquise aplicações de IA em satélites de observação da Terra."}).json()["id"]
+    wait_for(lambda: status(client, pid)["status"] == "failed")
+    client.post(f"{API}/credentials", json={"provider": "groq", "alias": "Groq pessoal", "api_key": "gsk-TESTE-000001"})
+    r = client.post(f"{API}/projects/{pid}/reanalyze", json={"provider": "groq", "model": "llama-teste", "applyToTeam": True})
+    assert r.status_code == 200 and r.json()["agentsUpdated"] == 6
+    p = wait_for(lambda: (d := status(client, pid))["status"] == "awaiting_approval" and d)
+    assert len(p["tasks"]) == 5
+    exe = client.get(f"{API}/projects/{pid}/executions").json()
+    assert exe[-1]["provider"] == "groq" and exe[-1]["model"] == "llama-teste" and exe[-1]["status"] == "ok"
+    agents = client.get(f"{API}/agents", params={"organizationId": org_id(client)}).json()
+    assert {a["intelligence"]["model"] for a in agents} == {"llama-teste"}
+    # não permite reanalisar durante a execução
+    client.post(f"{API}/projects/{pid}/plan/decision", json={"approve": True})
+    if status(client, pid)["status"] == "running":
+        assert client.post(f"{API}/projects/{pid}/reanalyze", json={}).status_code in (200, 409)
+    wait_for(lambda: status(client, pid)["status"] == "delivered")
+    assert client.post(f"{API}/projects/{pid}/retry").status_code == 409  # nada falhou
+
+
+def test_provedor_desativado_bloqueia_execucao_e_estado_e_salvo(client):
+    client.post(f"{API}/credentials", json={"provider": "gemini", "alias": "Gemini pessoal", "api_key": "AIza-TESTE-0001"})
+    r = client.put(f"{API}/providers", json={"gemini": {"enabled": False, "defaultModel": "gemini-x", "customModels": ["gemini-x"]}, "groq": {"enabled": True}})
+    assert r.status_code == 200
+    prov = {p["id"]: p for p in client.get(f"{API}/providers").json()}
+    assert prov["gemini"]["enabled"] is False and prov["gemini"]["defaultModel"] == "gemini-x"
+    assert "gemini-x" in [m["id"] for m in prov["gemini"]["models"]]
+    pid = client.post(f"{API}/projects", json={"organizationId": org_id(client), "request": "Pesquise aplicações de IA em drones agrícolas."}).json()["id"]
+    p = wait_for(lambda: (d := status(client, pid))["status"] == "failed" and d)
+    assert "desativado" in p["error"]

@@ -7,8 +7,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.auth import CurrentUser
 from app.db import get_db
-from app.models import AgentMessage, Approval, Artifact, ArtifactVersion, Evidence, Execution, Project, Task
+from app.deps import user
+from app.models import Organization, AgentMessage, Approval, Artifact, ArtifactVersion, Evidence, Execution, Project, Task
 from app.services.orchestrator import diff_versions, execution_public, message_public, orchestrator
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
@@ -35,9 +37,9 @@ def project_public(p: Project, db: Session, full: bool = False) -> dict:
     return d
 
 
-def get_project(pid: str, db: Session) -> Project:
+def get_project(pid: str, db: Session, u: CurrentUser) -> Project:
     p = db.get(Project, pid)
-    if not p:
+    if not p or p.owner_id != u.id:
         raise HTTPException(404, "Projeto não encontrado")
     return p
 
@@ -50,23 +52,27 @@ class ProjectIn(BaseModel):
 
 
 @router.get("")
-def list_projects(organizationId: str | None = None, db: Session = Depends(get_db)):
-    q = select(Project).order_by(Project.created_at.desc())
+def list_projects(organizationId: str | None = None, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    q = select(Project).where(Project.owner_id == u.id).order_by(Project.created_at.desc())
     if organizationId:
         q = q.where(Project.organization_id == organizationId)
     return [project_public(p, db) for p in db.scalars(q)]
 
 
 @router.post("", status_code=201)
-async def create_project(body: ProjectIn, db: Session = Depends(get_db)):
+async def create_project(body: ProjectIn, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    if body.organizationId:
+        o = db.get(Organization, body.organizationId)
+        if not o or o.owner_id != u.id:
+            raise HTTPException(404, "Organização não encontrada")
     title = body.title.strip() or body.request.strip().split("\n")[0][:80]
-    pid = orchestrator.create_project(body.organizationId, title, body.request, body.budgetUsd)
+    pid = orchestrator.create_project(body.organizationId, title, body.request, body.budgetUsd, owner=u.id)
     return project_public(db.get(Project, pid), db, full=True)
 
 
 @router.get("/{pid}")
-def project(pid: str, db: Session = Depends(get_db)):
-    return project_public(get_project(pid, db), db, full=True)
+def project(pid: str, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    return project_public(get_project(pid, db, u), db, full=True)
 
 
 class PlanTask(BaseModel):
@@ -91,11 +97,11 @@ def _wrap(fn, *args):
 
 
 @router.put("/{pid}/plan")
-async def edit_plan(pid: str, body: PlanIn, db: Session = Depends(get_db)):
-    get_project(pid, db)
+async def edit_plan(pid: str, body: PlanIn, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    get_project(pid, db, u)
     _wrap(orchestrator.update_plan, pid, [t.model_dump() for t in body.tasks])
     db.expire_all()
-    return project_public(get_project(pid, db), db, full=True)
+    return project_public(get_project(pid, db, u), db, full=True)
 
 
 class DecisionIn(BaseModel):
@@ -104,19 +110,43 @@ class DecisionIn(BaseModel):
 
 
 @router.post("/{pid}/plan/decision")
-async def plan_decision(pid: str, body: DecisionIn, db: Session = Depends(get_db)):
-    get_project(pid, db)
+async def plan_decision(pid: str, body: DecisionIn, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    get_project(pid, db, u)
     _wrap(orchestrator.decide_plan, pid, body.approve, body.note)
     db.expire_all()
-    return project_public(get_project(pid, db), db, full=True)
+    return project_public(get_project(pid, db, u), db, full=True)
 
 
 @router.post("/{pid}/delivery/decision")
-async def delivery_decision(pid: str, body: DecisionIn, db: Session = Depends(get_db)):
-    get_project(pid, db)
+async def delivery_decision(pid: str, body: DecisionIn, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    get_project(pid, db, u)
     _wrap(orchestrator.decide_delivery, pid, body.approve, body.note)
     db.expire_all()
-    return project_public(get_project(pid, db), db, full=True)
+    return project_public(get_project(pid, db, u), db, full=True)
+
+
+class ReanalyzeIn(BaseModel):
+    provider: str | None = Field(default=None, pattern="^(gemini|groq|openai|huggingface|ollama)$")
+    model: str = Field(default="", max_length=120)
+    applyToTeam: bool = False
+    note: str = Field(default="", max_length=2000)
+
+
+@router.post("/{pid}/reanalyze")
+async def reanalyze(pid: str, body: ReanalyzeIn, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    """Refaz o plano do projeto — útil após trocar o modelo de IA (opcionalmente aplicado à equipe)."""
+    get_project(pid, db, u)
+    changed = _wrap(orchestrator.reanalyze, pid, body.provider, body.model.strip(), body.applyToTeam, body.note.strip())
+    db.expire_all()
+    return {**project_public(get_project(pid, db, u), db, full=True), "agentsUpdated": changed}
+
+
+@router.post("/{pid}/retry")
+async def retry(pid: str, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    get_project(pid, db, u)
+    _wrap(orchestrator.retry_failed, pid)
+    db.expire_all()
+    return project_public(get_project(pid, db, u), db, full=True)
 
 
 class ActionIn(BaseModel):
@@ -124,11 +154,11 @@ class ActionIn(BaseModel):
 
 
 @router.post("/{pid}/control")
-async def control(pid: str, body: ActionIn, db: Session = Depends(get_db)):
-    get_project(pid, db)
+async def control(pid: str, body: ActionIn, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    get_project(pid, db, u)
     _wrap(orchestrator.set_status, pid, body.action)
     db.expire_all()
-    return project_public(get_project(pid, db), db)
+    return project_public(get_project(pid, db, u), db)
 
 
 class BudgetIn(BaseModel):
@@ -136,11 +166,11 @@ class BudgetIn(BaseModel):
 
 
 @router.put("/{pid}/budget")
-def budget(pid: str, body: BudgetIn, db: Session = Depends(get_db)):
-    get_project(pid, db)
+def budget(pid: str, body: BudgetIn, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    get_project(pid, db, u)
     orchestrator.set_budget(pid, body.budgetUsd)
     db.expire_all()
-    return project_public(get_project(pid, db), db)
+    return project_public(get_project(pid, db, u), db)
 
 
 class FeedbackIn(BaseModel):
@@ -150,11 +180,11 @@ class FeedbackIn(BaseModel):
 
 
 @router.post("/{pid}/feedback")
-async def feedback(pid: str, body: FeedbackIn, db: Session = Depends(get_db)):
-    get_project(pid, db)
+async def feedback(pid: str, body: FeedbackIn, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    get_project(pid, db, u)
     _wrap(orchestrator.feedback, pid, body.artifactId, body.text, body.agentId)
     db.expire_all()
-    return project_public(get_project(pid, db), db, full=True)
+    return project_public(get_project(pid, db, u), db, full=True)
 
 
 class GuidanceIn(BaseModel):
@@ -163,19 +193,26 @@ class GuidanceIn(BaseModel):
 
 
 @router.post("/{pid}/guidance")
-async def guidance(pid: str, body: GuidanceIn, db: Session = Depends(get_db)):
-    get_project(pid, db)
+async def guidance(pid: str, body: GuidanceIn, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    get_project(pid, db, u)
+    from app.models import Agent
+
+    ag = db.get(Agent, body.agentId)
+    if not ag or ag.owner_id != u.id:
+        raise HTTPException(404, "Agente não encontrado")
     _wrap(orchestrator.guidance, pid, body.agentId, body.text)
     return {"ok": True}
 
 
 @router.get("/{pid}/messages")
-def messages(pid: str, db: Session = Depends(get_db)):
+def messages(pid: str, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    get_project(pid, db, u)
     return [message_public(m) for m in db.scalars(select(AgentMessage).where(AgentMessage.project_id == pid).order_by(AgentMessage.created_at))]
 
 
 @router.get("/{pid}/artifacts")
-def artifacts(pid: str, db: Session = Depends(get_db)):
+def artifacts(pid: str, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    get_project(pid, db, u)
     out = []
     for a in db.scalars(select(Artifact).where(Artifact.project_id == pid).order_by(Artifact.created_at)):
         vs = list(db.scalars(select(ArtifactVersion).where(ArtifactVersion.artifact_id == a.id).order_by(ArtifactVersion.version)))
@@ -185,7 +222,10 @@ def artifacts(pid: str, db: Session = Depends(get_db)):
     return out
 
 
-def _version(db: Session, aid: str, version: int | None) -> ArtifactVersion:
+def _version(db: Session, aid: str, version: int | None, pid: str | None = None) -> ArtifactVersion:
+    art = db.get(Artifact, aid)
+    if not art or (pid and art.project_id != pid):
+        raise HTTPException(404, "Documento não encontrado")
     q = select(ArtifactVersion).where(ArtifactVersion.artifact_id == aid)
     q = q.where(ArtifactVersion.version == version) if version else q.order_by(ArtifactVersion.version.desc())
     v = db.scalars(q).first()
@@ -195,22 +235,25 @@ def _version(db: Session, aid: str, version: int | None) -> ArtifactVersion:
 
 
 @router.get("/{pid}/artifacts/{aid}")
-def artifact_content(pid: str, aid: str, version: int | None = None, db: Session = Depends(get_db)):
-    v = _version(db, aid, version)
+def artifact_content(pid: str, aid: str, version: int | None = None, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    get_project(pid, db, u)
+    v = _version(db, aid, version, pid)
     return {"artifactId": aid, "version": v.version, "content": v.content, "note": v.note, "agentId": v.agent_id, "createdAt": v.created_at.isoformat()}
 
 
 @router.get("/{pid}/artifacts/{aid}/diff")
-def artifact_diff(pid: str, aid: str, a: int, b: int, db: Session = Depends(get_db)):
-    return {"from": a, "to": b, "diff": diff_versions(_version(db, aid, a).content, _version(db, aid, b).content)}
+def artifact_diff(pid: str, aid: str, a: int, b: int, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    get_project(pid, db, u)
+    return {"from": a, "to": b, "diff": diff_versions(_version(db, aid, a, pid).content, _version(db, aid, b, pid).content)}
 
 
 @router.get("/{pid}/artifacts/{aid}/download", response_class=PlainTextResponse)
-def download(pid: str, aid: str, version: int | None = None, db: Session = Depends(get_db)):
+def download(pid: str, aid: str, version: int | None = None, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    get_project(pid, db, u)
     art = db.get(Artifact, aid)
     if not art:
         raise HTTPException(404, "Documento não encontrado")
-    v = _version(db, aid, version)
+    v = _version(db, aid, version, pid)
     import unicodedata
     from urllib.parse import quote
 
@@ -221,12 +264,14 @@ def download(pid: str, aid: str, version: int | None = None, db: Session = Depen
 
 
 @router.get("/{pid}/evidence")
-def evidence(pid: str, db: Session = Depends(get_db)):
+def evidence(pid: str, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    get_project(pid, db, u)
     return [{"id": e.id, "code": e.code, "source": e.source, "title": e.title, "authors": e.authors, "year": e.year, "doi": e.doi, "url": e.url,
              "abstract": e.abstract, "fullText": e.full_text, "query": e.query, "taskId": e.task_id, "agentId": e.agent_id, "accessedAt": e.accessed_at.isoformat()}
             for e in db.scalars(select(Evidence).where(Evidence.project_id == pid).order_by(Evidence.accessed_at))]
 
 
 @router.get("/{pid}/executions")
-def executions(pid: str, db: Session = Depends(get_db)):
+def executions(pid: str, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    get_project(pid, db, u)
     return [execution_public(e) for e in db.scalars(select(Execution).where(Execution.project_id == pid).order_by(Execution.created_at))]

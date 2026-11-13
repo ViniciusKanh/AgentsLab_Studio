@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Cpu, KeyRound, Lock, Plus, Server, ShieldCheck, Star, Trash2 } from 'lucide-react'
+import { Cpu, KeyRound, Lock, Plus, RefreshCw, RotateCcw, Save, Server, ShieldCheck, Star, Trash2 } from 'lucide-react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { useLabStore } from '@/stores/labStore'
+import { useUiStore } from '@/stores/uiStore'
 import { Chip, DemoTag, Field, Panel, Tabs, Toggle, cx } from '@/components/ui/primitives'
 import { appConfig } from '@/services/config'
 import { platform } from '@/services/platform'
 import { ConfirmModal } from '@/components/ui/Modal'
 import { PROVIDER_COLORS, providerIconUrl } from '@/lib/assets'
 import { fmtCompact, fmtCost, fmtInt, fmtUsd } from '@/lib/format'
-import type { ProviderId } from '@/types/domain'
+import type { Provider, ProviderId } from '@/types/domain'
 import type { Project, Usage, UsageRow } from '@/types/platform'
 
 type T = 'provedores' | 'catalogo' | 'chaves' | 'limites' | 'custos'
@@ -19,7 +20,7 @@ export default function ModelsPage() {
   const [params, setParams] = useSearchParams()
   const tab = (params.get('tab') as T) || 'provedores'
   const focus = params.get('provider') as ProviderId | null
-  const { providers, updateProvider, credentials } = useLabStore()
+  const { providers } = useLabStore()
   const real = appConfig.mode === 'real'
 
   return (
@@ -33,31 +34,7 @@ export default function ModelsPage() {
       </div>
       <Tabs value={tab} onChange={(t) => setParams({ tab: t })} items={[{ id: 'provedores', label: 'Provedores' }, { id: 'chaves', label: 'Chaves (API)' }, { id: 'custos', label: 'Consumo e custos' }, { id: 'limites', label: 'Limites' }, { id: 'catalogo', label: 'Catálogo de modelos' }]} />
 
-      {tab === 'provedores' && (
-        <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2 xl:grid-cols-5">
-          {providers.map((p) => {
-            const keys = credentials.filter((c) => c.provider === p.id && c.status !== 'demo').length
-            return (
-              <article key={p.id} className={cx('px-panel flex flex-col gap-2 p-3', focus === p.id && 'ring-2 ring-neon-cyan')} style={{ ['--c' as string]: PROVIDER_COLORS[p.id] }} data-testid={`provider-${p.id}`}>
-                <div className="flex items-center gap-2">
-                  <img src={providerIconUrl(p.id)} alt="" className="pixel h-9 w-9" />
-                  <div className="min-w-0 flex-1"><p className="text-[14px] font-extrabold">{p.name}</p><Chip color="#9d62ff">{p.badge}</Chip></div>
-                  <Toggle checked={p.enabled} onChange={(v) => updateProvider(p.id, { enabled: v })} label={`Ativar ${p.name}`} />
-                </div>
-                <p className={cx('text-[11px] font-bold', real && (keys || p.kind === 'local') ? 'text-neon-green' : 'text-lab-muted')}>
-                  ● {!real ? 'Backend desconectado' : p.kind === 'local' ? 'Local (requer Ollama em execução)' : keys ? `${keys} chave(s) cadastrada(s)` : 'Sem chave cadastrada'}
-                </p>
-                <label className="text-[11px]"><span className="px-label">Modelo padrão</span>
-                  <select className="px-input py-1" value={p.defaultModel} onChange={(e) => updateProvider(p.id, { defaultModel: e.target.value })}>{p.models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
-                </label>
-                {real ? (
-                  <p className="text-[10.5px] text-lab-muted">Últimos 30 dias: <b className="text-lab-text">{fmtCompact(p.usage.tokensMonth)}</b> tokens · <b className="text-lab-text">{fmtCost(p.usage.costUsdMonth)}</b> <span className="opacity-70">(estimativa)</span></p>
-                ) : <p className="text-[10.5px] text-lab-muted">Consumo disponível com o backend conectado.</p>}
-              </article>
-            )
-          })}
-        </div>
-      )}
+      {tab === 'provedores' && <ProvidersTab focus={focus} />}
 
       {tab === 'catalogo' && (
         <Panel accent="purple" title="Catálogo de modelos">
@@ -68,7 +45,7 @@ export default function ModelsPage() {
                 <tr key={`${p.id}-${m.id}`} className="border-t border-white/5">
                   <td className="py-1.5"><span className="flex items-center gap-1.5"><img src={providerIconUrl(p.id)} className="pixel h-4 w-4" alt="" />{p.name}</span></td>
                   <td className="font-bold">{m.name}<span className="block font-mono text-[10px] font-normal text-lab-muted">{m.id}</span></td>
-                  <td>{fmtInt(m.contextWindow)}</td>
+                  <td>{m.contextWindow ? fmtInt(m.contextWindow) : '—'}</td>
                   <td>{m.inputPer1M === null ? '—' : fmtUsd(m.inputPer1M)}</td>
                   <td>{m.outputPer1M === null ? '—' : fmtUsd(m.outputPer1M)}</td>
                   <td className="space-x-1">{m.tags.map((t) => <Chip key={t} color="#8b97c4">{t}</Chip>)}</td>
@@ -207,6 +184,108 @@ function CredentialsTab() {
         </Panel>
       </div>
       <ConfirmModal open={!!confirm} onClose={() => setConfirm(null)} onConfirm={() => confirm && void deleteCredential(confirm)} title="Excluir perfil" message="Os agentes que usam este perfil voltarão para a chave padrão do provedor." confirmLabel="Excluir" />
+    </div>
+  )
+}
+
+type Draft = Record<string, { enabled: boolean; defaultModel: string; customModels: string[] }>
+const toDraft = (ps: Provider[]): Draft => Object.fromEntries(ps.map((p) => [p.id, { enabled: p.enabled, defaultModel: p.defaultModel, customModels: [] }]))
+
+/**
+ * Provedores: as alterações (ativar/desativar, modelo padrão, modelos personalizados) ficam em
+ * rascunho até clicar em "Salvar" — então são gravadas no backend e valem para os agentes.
+ */
+function ProvidersTab({ focus }: { focus: ProviderId | null }) {
+  const { providers, credentials } = useLabStore()
+  const toast = useUiStore((s) => s.toast)
+  const real = appConfig.mode === 'real'
+  const [draft, setDraft] = useState<Draft>(() => toDraft(providers))
+  const [custom, setCustom] = useState<Record<string, string>>({})
+  const [busy, setBusy] = useState<string | null>(null)
+  useEffect(() => { setDraft(toDraft(providers)) }, [providers])
+  const dirty = providers.filter((p) => {
+    const d = draft[p.id]
+    return d && (d.enabled !== p.enabled || d.defaultModel !== p.defaultModel || d.customModels.length > 0)
+  })
+  const patch = (id: string, v: Partial<Draft[string]>) => setDraft((s) => ({ ...s, [id]: { ...s[id], ...v } }))
+  const save = async () => {
+    setBusy('save')
+    try {
+      const body = Object.fromEntries(dirty.map((p) => [p.id, draft[p.id]]))
+      const next = await platform.saveProviders(body)
+      useLabStore.setState({ providers: next })
+      toast('Configuração dos provedores salva', 'success')
+    } catch (err) {
+      toast((err as Error).message, 'error')
+    } finally {
+      setBusy(null)
+    }
+  }
+  const refresh = async (id: string) => {
+    setBusy(id)
+    try {
+      const p = await platform.refreshModels(id)
+      useLabStore.setState({ providers: useLabStore.getState().providers.map((x) => (x.id === id ? p : x)) })
+      toast(`${p.models.length} modelos disponíveis em ${p.name}`, 'success')
+    } catch (err) {
+      toast((err as Error).message, 'error')
+    } finally {
+      setBusy(null)
+    }
+  }
+  return (
+    <div className="flex flex-col gap-2.5" data-testid="providers-tab">
+      <div className="flex flex-wrap items-center gap-2 rounded-[6px] border border-lab-line/60 bg-[#0b1230]/80 px-3 py-2 text-[12px]">
+        <span className={dirty.length ? 'font-bold text-neon-gold' : 'text-lab-muted'} data-testid="providers-dirty">{dirty.length ? `${dirty.length} provedor(es) com alterações não salvas` : 'Todas as alterações estão salvas'}</span>
+        <span className="ml-auto flex gap-1.5">
+          <button className="px-btn sm ghost" disabled={!dirty.length || !!busy} onClick={() => { setDraft(toDraft(providers)); setCustom({}) }}><RotateCcw size={13} /> Descartar</button>
+          <button className="px-btn sm solid" disabled={!real || !dirty.length || !!busy} onClick={() => void save()} data-testid="providers-save"><Save size={13} /> {busy === 'save' ? 'Salvando…' : 'Salvar'}</button>
+        </span>
+      </div>
+      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
+        {providers.map((p) => {
+          const d = draft[p.id] ?? { enabled: p.enabled, defaultModel: p.defaultModel, customModels: [] }
+          const keys = credentials.filter((c) => c.provider === p.id && c.status !== 'demo').length
+          const models = [...p.models, ...d.customModels.filter((m) => !p.models.some((x) => x.id === m)).map((m) => ({ id: m, name: `${m} (novo)` }))]
+          const changed = dirty.some((x) => x.id === p.id)
+          return (
+            <article key={p.id} className={cx('px-panel flex flex-col gap-2 p-3', focus === p.id && 'ring-2 ring-neon-cyan', !d.enabled && 'opacity-70')} style={{ ['--c' as string]: PROVIDER_COLORS[p.id] }} data-testid={`provider-${p.id}`}>
+              <div className="flex items-center gap-2">
+                <img src={providerIconUrl(p.id)} alt="" className="pixel h-9 w-9" />
+                <div className="min-w-0 flex-1"><p className="text-[14px] font-extrabold">{p.name} {changed && <span className="text-neon-gold" title="Alterado">•</span>}</p><Chip color="#9d62ff">{p.badge}</Chip></div>
+                <Toggle checked={d.enabled} onChange={(v) => patch(p.id, { enabled: v })} label={`Ativar ${p.name}`} />
+              </div>
+              <p className={cx('text-[11px] font-bold', real && (keys || p.kind === 'local') ? 'text-neon-green' : 'text-lab-muted')}>
+                ● {!d.enabled ? 'Desativado — agentes não usam este provedor' : !real ? 'Backend desconectado' : p.kind === 'local' ? 'Local (requer Ollama em execução)' : keys ? `${keys} chave(s) cadastrada(s)` : 'Sem chave cadastrada'}
+              </p>
+              <label className="text-[11px]"><span className="px-label">Modelo padrão</span>
+                <select className="px-input py-1" value={d.defaultModel} onChange={(e) => patch(p.id, { defaultModel: e.target.value })} data-testid={`default-model-${p.id}`}>
+                  {!models.some((m) => m.id === d.defaultModel) && <option value={d.defaultModel}>{d.defaultModel}</option>}
+                  {models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
+              </label>
+              <div className="flex gap-1">
+                <input className="px-input py-1 text-[11px]" placeholder="adicionar id de modelo" value={custom[p.id] ?? ''} onChange={(e) => setCustom({ ...custom, [p.id]: e.target.value })} aria-label={`Novo modelo para ${p.name}`} />
+                <button className="px-btn sm" disabled={!(custom[p.id] ?? '').trim()} onClick={() => {
+                  const id = (custom[p.id] ?? '').trim()
+                  patch(p.id, { customModels: [...d.customModels, id], defaultModel: id })
+                  setCustom({ ...custom, [p.id]: '' })
+                }} aria-label="Adicionar modelo"><Plus size={12} /></button>
+              </div>
+              {p.id !== 'huggingface' && (
+                <button className="px-btn sm ghost" disabled={!real || busy === p.id || (p.kind !== 'local' && !keys)} onClick={() => void refresh(p.id)} title={p.kind !== 'local' && !keys ? 'Cadastre uma chave primeiro' : 'Consulta a API do provedor com a sua chave'} data-testid={`refresh-models-${p.id}`}>
+                  <RefreshCw size={12} className={busy === p.id ? 'animate-spin' : ''} /> {busy === p.id ? 'Consultando…' : 'Atualizar lista de modelos'}
+                </button>
+              )}
+              <p className="text-[10px] text-lab-muted">{p.modelsSyncedAt ? `Lista sincronizada em ${new Date(p.modelsSyncedAt).toLocaleString('pt-BR')}` : 'Lista de referência — sincronize para ver os modelos da sua chave.'}</p>
+              {real ? (
+                <p className="text-[10.5px] text-lab-muted">Últimos 30 dias: <b className="text-lab-text">{fmtCompact(p.usage.tokensMonth)}</b> tokens · <b className="text-lab-text">{fmtCost(p.usage.costUsdMonth)}</b> <span className="opacity-70">(estimativa)</span></p>
+              ) : <p className="text-[10.5px] text-lab-muted">Consumo disponível com o backend conectado.</p>}
+            </article>
+          )
+        })}
+      </div>
+      <p className="text-[11px] text-lab-muted">Agentes com o modelo em branco usam o <b>modelo padrão</b> do provedor. Provedores desativados não são usados: projetos que dependam deles falham com aviso — use <b>Reanalisar</b> no projeto para trocar o modelo da equipe.</p>
     </div>
   )
 }

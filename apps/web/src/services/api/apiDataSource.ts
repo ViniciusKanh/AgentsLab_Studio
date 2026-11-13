@@ -1,5 +1,6 @@
 import type { LabDataSource } from '../dataSource'
 import { NotAvailableError } from '../dataSource'
+import { apiFetch } from '../http'
 import type { Agent, CredentialProfile, EnvironmentInfo, ExecutionRun, KnowledgeBase, LogEntry, Provider, Workflow } from '@/types/domain'
 
 /** Extrai a mensagem de erro do FastAPI ({detail}) para exibir ao usuário. */
@@ -18,12 +19,9 @@ export async function errorText(res: Response): Promise<string> {
  * Endpoints documentados em docs/ARCHITECTURE.md e apps/api/app/routers.
  * Credenciais de LLM NUNCA trafegam pelo frontend — ficam no backend.
  */
-export function createApiDataSource(baseUrl: () => string): LabDataSource {
+export function createApiDataSource(): LabDataSource {
   async function http<T>(path: string, init?: RequestInit): Promise<T> {
-    const res = await fetch(`${baseUrl()}/api/v1${path}`, {
-      ...init,
-      headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
-    })
+    const res = await apiFetch(`/api/v1${path}`, init)
     if (res.status === 501) throw new NotAvailableError(path)
     if (!res.ok) throw new Error(await errorText(res))
     return res.status === 204 ? (undefined as T) : ((await res.json()) as T)

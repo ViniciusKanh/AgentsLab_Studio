@@ -7,7 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.auth import CurrentUser
 from app.db import get_db
+from app.deps import user
 from app.services.vault import CredentialService, VaultError, get_store
 
 router = APIRouter(prefix="/api/v1/credentials", tags=["credentials"])
@@ -20,9 +22,9 @@ class CredentialIn(BaseModel):
     is_default: bool = False
 
 
-def service(db: Session = Depends(get_db)) -> CredentialService:
+def service(db: Session = Depends(get_db), u: CurrentUser = Depends(user)) -> CredentialService:
     try:
-        return CredentialService(db, get_store())
+        return CredentialService(db, get_store(), owner_id=u.id)
     except VaultError as exc:
         raise HTTPException(503, f"Cofre de credenciais indisponível: {exc}") from exc
 
@@ -33,7 +35,7 @@ def list_credentials(svc: CredentialService = Depends(service)):
 
 
 @router.get("/vault")
-def vault_info():
+def vault_info(_u: CurrentUser = Depends(user)):
     try:
         st = get_store()
         return {"available": True, "backend": getattr(st, "backend_name", st.name), "kind": st.name}

@@ -30,7 +30,19 @@ def make_engine(url: str | None = None):
             cur.close()
 
         return eng
-    return create_engine(url, pool_pre_ping=True)
+    # Supabase (pooler/PgBouncer em modo transação) não aceita prepared statements do psycopg 3
+    args = {"prepare_threshold": None} if url.startswith("postgresql+psycopg") else {}
+    eng = create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=5, connect_args=args)
+    if eng.dialect.name == "postgresql" and settings.db_schema:
+        # tabelas do app em um schema próprio (não exposto pela Data API/PostgREST do Supabase)
+        with eng.begin() as conn:
+            conn.exec_driver_sql(f'CREATE SCHEMA IF NOT EXISTS "{settings.db_schema}"')
+        eng = eng.execution_options(schema_translate_map={None: settings.db_schema})
+    return eng
+
+
+def schema() -> str | None:
+    return settings.db_schema if engine.dialect.name == "postgresql" and settings.db_schema else None
 
 
 engine = make_engine()

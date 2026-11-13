@@ -21,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import Credential
+from app.models import Credential, Secret
 
 SERVICE = "AgentsLab_Studio"
 PROVIDERS = {"gemini", "groq", "openai", "huggingface", "ollama"}
@@ -97,13 +97,54 @@ class FernetFileStore:
         d = self._load(); d.pop(key, None); self._save(d)
 
 
+class DbFernetStore:
+    """Segredos criptografados (Fernet) no próprio banco — para o servidor hospedado (disco efêmero).
+    A chave mestra (AGENTSLAB_MASTER_KEY) fica só nas variáveis do servidor, nunca no banco."""
+    name = "db"
+
+    def __init__(self, master_key: str):
+        from cryptography.fernet import Fernet
+
+        if not master_key:
+            raise VaultError("AGENTSLAB_MASTER_KEY ausente para o cofre no banco")
+        self._f = Fernet(master_key.encode())
+
+    def set(self, key, secret):
+        from app.db import session_scope
+
+        with session_scope() as s:
+            row = s.get(Secret, key)
+            enc = self._f.encrypt(secret.encode()).decode()
+            if row:
+                row.value_enc = enc
+            else:
+                s.add(Secret(key=key, value_enc=enc))
+
+    def get(self, key):
+        from app.db import session_scope
+
+        with session_scope() as s:
+            row = s.get(Secret, key)
+            return self._f.decrypt(row.value_enc.encode()).decode() if row else None
+
+    def delete(self, key):
+        from app.db import session_scope
+
+        with session_scope() as s:
+            row = s.get(Secret, key)
+            if row:
+                s.delete(row)
+
+
 _store: SecretStore | None = None
 
 
 def get_store() -> SecretStore:
     global _store
     if _store is None:
-        if settings.secret_backend == "keyring":
+        if settings.secret_backend == "db":
+            _store = DbFernetStore(settings.master_key or os.environ.get("AGENTSLAB_MASTER_KEY", ""))
+        elif settings.secret_backend == "keyring":
             try:
                 _store = KeyringStore()
             except Exception:
@@ -124,12 +165,20 @@ def public(c: Credential) -> dict:
 
 
 class CredentialService:
-    def __init__(self, db: Session, store: SecretStore | None = None):
+    def __init__(self, db: Session, store: SecretStore | None = None, owner_id: str = "local"):
         self.db = db
         self.store = store or get_store()
+        self.owner = owner_id
+
+    def _q(self):
+        return select(Credential).where(Credential.owner_id == self.owner)
+
+    def _get(self, cid: str) -> Credential | None:
+        c = self.db.get(Credential, cid)
+        return c if c and c.owner_id == self.owner else None
 
     def list(self) -> list[dict]:
-        return [public(c) for c in self.db.scalars(select(Credential).order_by(Credential.created_at))]
+        return [public(c) for c in self.db.scalars(self._q().order_by(Credential.created_at))]
 
     def create(self, provider: str, alias: str, api_key: str, make_default: bool = False) -> dict:
         if provider not in PROVIDERS:
@@ -140,10 +189,10 @@ class CredentialService:
         api_key = (api_key or "").strip()
         if provider != "ollama" and len(api_key) < 8:
             raise ValueError("Informe a chave de API (mínimo 8 caracteres)")
-        first = not self.db.scalars(select(Credential).where(Credential.provider == provider)).first()
-        c = Credential(provider=provider, alias=alias, last4=api_key[-4:] if api_key else None, is_default=make_default or first)
+        first = not self.db.scalars(self._q().where(Credential.provider == provider)).first()
+        c = Credential(owner_id=self.owner, provider=provider, alias=alias, last4=api_key[-4:] if api_key else None, is_default=make_default or first)
         if c.is_default:
-            for other in self.db.scalars(select(Credential).where(Credential.provider == provider)):
+            for other in self.db.scalars(self._q().where(Credential.provider == provider)):
                 other.is_default = False
         self.db.add(c)
         self.db.flush()
@@ -152,7 +201,7 @@ class CredentialService:
         return public(c)
 
     def delete(self, cid: str) -> bool:
-        c = self.db.get(Credential, cid)
+        c = self._get(cid)
         if not c:
             return False
         self.store.delete(cid)
@@ -161,10 +210,10 @@ class CredentialService:
         return True
 
     def set_default(self, cid: str) -> dict:
-        c = self.db.get(Credential, cid)
+        c = self._get(cid)
         if not c:
             raise KeyError(cid)
-        for other in self.db.scalars(select(Credential).where(Credential.provider == c.provider)):
+        for other in self.db.scalars(self._q().where(Credential.provider == c.provider)):
             other.is_default = other.id == cid
         self.db.commit()
         return public(c)
@@ -172,11 +221,12 @@ class CredentialService:
     def resolve(self, provider: str, credential_id: str | None) -> str | None:
         """Chave efetiva: perfil do agente → perfil padrão do provedor → variável de ambiente."""
         if credential_id:
-            c = self.db.get(Credential, credential_id)
+            c = self._get(credential_id)
             if c and c.provider == provider:
                 return self.store.get(c.id)
-        d = self.db.scalars(select(Credential).where(Credential.provider == provider, Credential.is_default.is_(True))).first()
+        d = self.db.scalars(self._q().where(Credential.provider == provider, Credential.is_default.is_(True))).first()
         if d:
             return self.store.get(d.id)
+        # variável de ambiente só vale no modo local (desktop) — nunca compartilhar a chave do servidor entre usuários
         env = ENV_FALLBACK.get(provider)
-        return os.environ.get(env) if env else None
+        return os.environ.get(env) if env and self.owner == "local" else None

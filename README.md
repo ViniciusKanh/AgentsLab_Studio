@@ -11,6 +11,19 @@
 
 > As capturas acima são geradas automaticamente com a API em **modo de teste** (respostas determinísticas, sem LLM real) para não depender de chaves no CI. Com suas chaves, o mesmo fluxo usa os modelos reais.
 
+## v1.3 — contas, publicação e celular
+
+- **Login e cadastro reais com Supabase Auth** (telas pixel art dos protótipos): e-mail + senha, mostrar/ocultar senha, “lembrar de mim”, verificação de e-mail obrigatória, recuperação e redefinição de senha, links expirados tratados, logout e rotas protegidas. Senhas e tokens ficam com o Supabase — o app nunca os armazena.
+- **Multiusuário isolado:** o backend valida o JWT do Supabase em cada requisição; organizações, agentes, projetos, chaves, preferências e eventos são de cada usuário (RLS no banco como defesa extra).
+- **Reanalisar projeto:** refaz o plano — opcionalmente trocando provedor/modelo de toda a equipe (ex.: quando o Google descontinua um modelo). **Repetir falhas** reexecuta só as tarefas que falharam.
+- **Provedores com rascunho + Salvar:** ativar/desativar e modelo padrão só valem após salvar e persistem; **Atualizar lista de modelos** consulta a API do provedor com a sua chave; ids de modelo personalizados.
+- **Publicação:** frontend na Vercel/Cloudflare Pages, backend em container (Dockerfile) e Supabase PostgreSQL — ver [docs/DEPLOY.md](docs/DEPLOY.md) e [docs/SUPABASE.md](docs/SUPABASE.md).
+- **Responsivo:** menu em gaveta no celular, painéis em tela cheia, login/cadastro adaptados.
+
+| Login | Cadastro | Celular |
+|---|---|---|
+| ![Login](docs/media/login.png) | ![Cadastro](docs/media/cadastro.png) | ![Login no celular](docs/media/login-celular.png) |
+
 ## v1.2 — o que mudou
 
 - **Sem gamificação:** XP, níveis, missões-RPG, recompensas, créditos e conquistas foram removidos. O estilo pixel art permanece.
@@ -30,6 +43,13 @@
 A chave sai do navegador uma única vez para o backend local, que a guarda no **cofre do sistema** via `keyring` (Windows: Gerenciador de Credenciais/DPAPI; macOS: Keychain; Linux: Secret Service). O banco guarda só apelido e os 4 últimos dígitos; a API nunca devolve a chave. Sem cofre disponível (CI/servidor), use `AGENTSLAB_SECRET_BACKEND=file` + `AGENTSLAB_MASTER_KEY` (arquivo criptografado com Fernet).
 
 **Microsoft Store (planejado):** empacotar com Tauri 2 (frontend) + backend Python como *sidecar* (PyInstaller) em MSIX — o mesmo modelo de chaves no cofre do Windows. Detalhes em [docs/PLANO_ADAPTACAO.md](docs/PLANO_ADAPTACAO.md).
+
+## Login (Supabase) — opcional no uso local
+
+Sem configurar o Supabase, o app roda em **modo local de usuário único** (sem login), como antes. Para ativar contas:
+1. Crie o projeto no Supabase e rode `supabase/migrations/20261113000001_profiles.sql` (passo a passo em [docs/SUPABASE.md](docs/SUPABASE.md)).
+2. `apps/web/.env`: `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY` (chave **publicável**).
+3. `apps/api/.env`: `AGENTSLAB_SUPABASE_URL` (mesma URL). Reinicie backend e frontend.
 
 ## Como executar (Windows / PowerShell)
 
@@ -60,12 +80,12 @@ O banco SQLite fica em `apps/api/data/agentslab.db` (PostgreSQL: `AGENTSLAB_DATA
 
 | Comando | O que valida |
 |---|---|
-| `cd apps/api; pytest` | 12 testes: fluxo completo da aeronáutica (plano → edição → aprovação → dependências → evidências → consolidação → revisão automática → feedback → v3 + diff → aprovação → custos), cofre multi-chave, orçamento, cancelamento, chat, tarefa avulsa, CRUD |
+| `cd apps/api; pytest` | 18 testes (também passam sobre PostgreSQL com `AGENTSLAB_TEST_DATABASE_URL`): fluxo completo da aeronáutica (plano → edição → aprovação → dependências → evidências → consolidação → revisão automática → feedback → v3 + diff → aprovação → custos), JWT do Supabase e isolamento entre usuários, reanálise com troca de modelo, provedor desativado, cofre multi-chave, orçamento, cancelamento, chat, tarefa avulsa, CRUD |
 | `cd apps/web; npm test` | Vitest: A\*, motor ambiental (entregas reais, ambientação sem falso progresso), eventos SSE → estados, stores, UI |
-| `npm run e2e` | Playwright: offline + conectado à API de teste (chave → cofre, projeto completo no navegador) |
+| `npm run e2e` | Playwright (16): cadastro → verificação → login → sessão → recuperação de senha → logout contra um Supabase Auth falso local; projeto completo; reanalisar; salvar provedores; celular |
 | `npm run media` | gera prints, MP4 e GIF em `docs/media` |
 
-Os testes usam LLM e ferramentas **determinísticos** (`apps/api/tests/fakes.py`), carregados somente nos testes.
+Os testes usam LLM, ferramentas e Supabase Auth **de teste** (`apps/api/tests/fakes.py`, `fake_supabase.py`), carregados somente nos testes.
 
 ## Publicar no GitHub
 
@@ -98,4 +118,4 @@ apps/web/src
 tools/pixelart           gerador procedural de sprites e mapas
 ```
 
-Documentação: [Plano de adaptação](docs/PLANO_ADAPTACAO.md) · [Arquitetura](docs/ARCHITECTURE.md) · [Roadmap](docs/ROADMAP.md) · [Design System](docs/DESIGN_SYSTEM.md) · [Agentes](docs/AGENT_MODEL.md) · [CLAUDE.md](CLAUDE.md)
+Documentação: [Supabase](docs/SUPABASE.md) · [Publicação](docs/DEPLOY.md) · [Plano de adaptação](docs/PLANO_ADAPTACAO.md) · [Arquitetura](docs/ARCHITECTURE.md) · [Roadmap](docs/ROADMAP.md) · [Design System](docs/DESIGN_SYSTEM.md) · [Agentes](docs/AGENT_MODEL.md) · [CLAUDE.md](CLAUDE.md)

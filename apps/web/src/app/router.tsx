@@ -16,6 +16,16 @@ const OrganizationsPage = lazy(() => import('@/features/organizations/Organizati
 const ProjectsPage = lazy(() => import('@/features/projects/ProjectsPage'))
 const ProjectWorkspacePage = lazy(() => import('@/features/projects/ProjectWorkspacePage'))
 const DocumentsPage = lazy(() => import('@/features/documents/DocumentsPage'))
+const Auth = () => import('@/features/auth/AuthPages')
+const LoginPage = lazy(() => Auth().then((m) => ({ default: m.LoginPage })))
+const RegisterPage = lazy(() => Auth().then((m) => ({ default: m.RegisterPage })))
+const CheckEmailPage = lazy(() => Auth().then((m) => ({ default: m.CheckEmailPage })))
+const ForgotPasswordPage = lazy(() => Auth().then((m) => ({ default: m.ForgotPasswordPage })))
+const ResetPasswordPage = lazy(() => Auth().then((m) => ({ default: m.ResetPasswordPage })))
+const AuthConfirmPage = lazy(() => Auth().then((m) => ({ default: m.AuthConfirmPage })))
+const LegalPage = lazy(() => Auth().then((m) => ({ default: m.LegalPage })))
+const RequireAuth = lazy(() => Auth().then((m) => ({ default: m.RequireAuth })))
+const PublicOnly = lazy(() => Auth().then((m) => ({ default: m.PublicOnly })))
 
 const S = (el: ReactNode) => <Suspense fallback={<p className="title-pixel animate-blink p-6 text-[10px] text-lab-muted">Carregando…</p>}>{el}</Suspense>
 
@@ -44,9 +54,19 @@ function RouteError() {
 const immersive = { immersive: true }
 
 export const routes = [
+  // rotas públicas (autenticação)
+  { path: '/entrar', element: S(<PublicOnly><LoginPage /></PublicOnly>), errorElement: <RouteError /> },
+  { path: '/cadastro', element: S(<PublicOnly><RegisterPage /></PublicOnly>), errorElement: <RouteError /> },
+  { path: '/verificar-email', element: S(<CheckEmailPage />), errorElement: <RouteError /> },
+  { path: '/recuperar-senha', element: S(<ForgotPasswordPage />), errorElement: <RouteError /> },
+  { path: '/redefinir-senha', element: S(<ResetPasswordPage />), errorElement: <RouteError /> },
+  { path: '/auth/confirm', element: S(<AuthConfirmPage />), errorElement: <RouteError /> },
+  { path: '/termos', element: S(<LegalPage kind="termos" />) },
+  { path: '/privacidade', element: S(<LegalPage kind="privacidade" />) },
+  // rotas privadas
   {
     path: '/',
-    element: <AppShell />,
+    element: S(<RequireAuth><AppShell /></RequireAuth>),
     errorElement: <RouteError />,
     children: [
       { index: true, element: S(<WorldPage />), handle: immersive },

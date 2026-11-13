@@ -38,6 +38,11 @@
 ## Dados
 `Organization`, `Department`, `Agent(config JSON)`, `Project`, `Task`, `AgentMessage(tipo)`, `Artifact`/`ArtifactVersion`, `Evidence(código, DOI/URL, resumo, full_text)`, `Execution(tokens, custo, latência, status)`, `Approval`, `Credential(metadados)`, `Event(log append-only)`, `KeyValue`.
 
+## Contas e isolamento (v1.3)
+- Frontend: `services/supabase.ts` (cliente PKCE, armazenamento “lembrar de mim”), `stores/authStore.ts`, `features/auth/*` (telas e guardas `RequireAuth`/`PublicOnly`), `services/http.ts` (Bearer token), SSE com `?access_token=`.
+- Backend: `app/auth.py` valida o JWT (JWKS do Supabase ou HS256 legado); `app/deps.py` injeta o usuário e cria suas organizações iniciais; rotas filtram por `owner_id`.
+- Banco: SQLite local ou PostgreSQL (schema `agentslab`, RLS) + `public.profiles` — ver `docs/SUPABASE.md`.
+
 ## Segurança
 - Chave digitada no app → `POST /credentials` → cofre do SO (`keyring`); banco só com apelido/últimos 4. Resolução: perfil do agente → padrão do provedor → variável de ambiente.
 - Prompts delimitam fontes e documentos como **dados não confiáveis**.

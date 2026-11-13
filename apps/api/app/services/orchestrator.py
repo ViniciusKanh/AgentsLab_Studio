@@ -22,6 +22,7 @@ from app.services import prompts as P
 from app.services.events import hub
 from app.services.llm import LLMError, get_gateway, parse_json
 from app.services.tools import get_tools
+from app.services.providers import resolve_model
 from app.services.vault import CredentialService
 
 KIND_MAP = {"pesquisa": "research", "analise": "analysis", "análise": "analysis", "redacao": "writing", "redação": "writing", "revisao": "review", "revisão": "review", "geral": "general"}
@@ -46,10 +47,20 @@ def agent_public(a: Agent) -> dict:
 class Orchestrator:
     def __init__(self):
         self.runners: dict[str, asyncio.Task] = {}
+        self._owners: dict[str, str] = {}
 
     # ------------------------------------------------------------------ utilidades
-    def emit(self, type_: str, payload: dict, project_id: str | None = None):
-        return hub.publish(type_, payload, project_id)
+    def owner_of(self, project_id: str | None) -> str:
+        if not project_id:
+            return "local"
+        if project_id not in self._owners:
+            with session_scope() as s:
+                p = s.get(Project, project_id)
+                self._owners[project_id] = p.owner_id if p else "local"
+        return self._owners[project_id]
+
+    def emit(self, type_: str, payload: dict, project_id: str | None = None, owner: str | None = None):
+        return hub.publish(type_, payload, project_id, owner or self.owner_of(project_id))
 
     def agent_state(self, agent_id: str | None, state: str, task: Task | None = None, partner: str | None = None, project_id: str | None = None):
         if agent_id:
@@ -57,14 +68,16 @@ class Orchestrator:
                                       "taskTitle": task.title if task else None, "partnerId": partner}, project_id)
 
     def message(self, project_id: str | None, type_: str, content: str, *, from_agent: str | None = None, to_agent: str | None = None,
-                from_kind: str = "agent", to_kind: str = "agent", task_id: str | None = None, artifact_ids: list | None = None, status: str = "processed") -> dict:
+                from_kind: str = "agent", to_kind: str = "agent", task_id: str | None = None, artifact_ids: list | None = None, status: str = "processed",
+                owner: str | None = None) -> dict:
+        owner = owner or self.owner_of(project_id)
         with session_scope() as s:
-            m = AgentMessage(project_id=project_id, task_id=task_id, from_kind=from_kind, from_agent_id=from_agent, to_kind=to_kind,
+            m = AgentMessage(owner_id=owner, project_id=project_id, task_id=task_id, from_kind=from_kind, from_agent_id=from_agent, to_kind=to_kind,
                              to_agent_id=to_agent, type=type_, content=content, artifact_ids=artifact_ids or [], status=status)
             s.add(m)
             s.flush()
             data = message_public(m)
-        self.emit("agent.message", data, project_id)
+        self.emit("agent.message", data, project_id, owner)
         return data
 
     def project_event(self, project_id: str):
@@ -89,7 +102,12 @@ class Orchestrator:
     async def llm(self, *, project_id: str | None, task_id: str | None, agent: Agent, purpose: str, messages: list[dict], json_mode: bool = False, max_tokens: int | None = None):
         cfg = agent.config or {}
         intel = cfg.get("intelligence", {})
-        provider, model = intel.get("provider", "gemini"), intel.get("model", "gemini-2.5-flash")
+        provider = intel.get("provider", "gemini")
+        owner = agent.owner_id
+        with session_scope() as s:
+            model, enabled = resolve_model(s, owner, provider, intel.get("model"))
+        if not enabled:
+            raise LLMError(f"O provedor {provider} está desativado em Provedores e Custos. Ative-o ou troque o modelo do agente ({agent.name}).")
         if project_id:
             with session_scope() as s:
                 p = s.get(Project, project_id)
@@ -98,16 +116,16 @@ class Orchestrator:
                 if p.llm_calls >= settings.max_llm_calls_per_project:
                     raise StopProject("calls")
         with session_scope() as s:
-            key = CredentialService(s).resolve(provider, intel.get("credentialId"))
+            key = CredentialService(s, owner_id=owner).resolve(provider, intel.get("credentialId"))
         try:
             r = await get_gateway().complete(provider=provider, model=model, api_key=key, messages=messages, temperature=float(intel.get("temperature", 0.3)),
                                              max_tokens=int(max_tokens or intel.get("maxOutputTokens", 2048)), json_mode=json_mode, purpose=purpose)
         except LLMError as exc:
             with session_scope() as s:
-                s.add(Execution(project_id=project_id, task_id=task_id, agent_id=agent.id, purpose=purpose, provider=provider, model=model, status="error", error=str(exc)[:2000]))
+                s.add(Execution(owner_id=owner, project_id=project_id, task_id=task_id, agent_id=agent.id, purpose=purpose, provider=provider, model=model, status="error", error=str(exc)[:2000]))
             raise
         with session_scope() as s:
-            e = Execution(project_id=project_id, task_id=task_id, agent_id=agent.id, purpose=purpose, provider=r.provider, model=r.model, input_tokens=r.input_tokens,
+            e = Execution(owner_id=owner, project_id=project_id, task_id=task_id, agent_id=agent.id, purpose=purpose, provider=r.provider, model=r.model, input_tokens=r.input_tokens,
                           output_tokens=r.output_tokens, cost_usd=r.cost_usd, cost_is_estimate=r.cost_is_estimate, latency_ms=r.latency_ms)
             s.add(e)
             if project_id:
@@ -116,13 +134,13 @@ class Orchestrator:
                 p.llm_calls += 1
             s.flush()
             exe = execution_public(e)
-        self.emit("execution", exe, project_id)
+        self.emit("execution", exe, project_id, owner)
         return r
 
     # ------------------------------------------------------------------ projetos
-    def create_project(self, organization_id: str | None, title: str, request: str, budget_usd: float | None = None) -> str:
+    def create_project(self, organization_id: str | None, title: str, request: str, budget_usd: float | None = None, owner: str = "local") -> str:
         with session_scope() as s:
-            p = Project(organization_id=organization_id, title=title.strip()[:200], request=request.strip(), budget_usd=budget_usd or settings.default_project_budget_usd)
+            p = Project(owner_id=owner, organization_id=organization_id, title=title.strip()[:200], request=request.strip(), budget_usd=budget_usd or settings.default_project_budget_usd)
             s.add(p)
             s.flush()
             pid = p.id
@@ -137,16 +155,22 @@ class Orchestrator:
         t.add_done_callback(lambda _t: self.runners.pop(project_id, None) if self.runners.get(project_id) is _t else None)
         return t
 
-    def coordinator_for(self, s, org_id: str | None) -> Agent | None:
-        q = select(Agent).where(Agent.organization_id == org_id) if org_id else select(Agent)
-        agents = list(s.scalars(q))
+    @staticmethod
+    def team_of(s, p: Project) -> list[Agent]:
+        q = select(Agent).where(Agent.owner_id == p.owner_id)
+        if p.organization_id:
+            q = q.where(Agent.organization_id == p.organization_id)
+        return list(s.scalars(q.order_by(Agent.created_at)))
+
+    def coordinator_for(self, s, p: Project) -> Agent | None:
+        agents = self.team_of(s, p)
         return next((a for a in agents if a.is_coordinator), agents[0] if agents else None)
 
     async def plan(self, project_id: str, note: str = ""):
         with session_scope() as s:
             p = s.get(Project, project_id)
-            coord = self.coordinator_for(s, p.organization_id)
-            team = list(s.scalars(select(Agent).where(Agent.organization_id == p.organization_id))) if p.organization_id else list(s.scalars(select(Agent)))
+            coord = self.coordinator_for(s, p)
+            team = self.team_of(s, p)
             team = [a for a in team if (a.config or {}).get("status", "active") == "active"]
             request, title = p.request, p.title
         if not coord or not team:
@@ -240,7 +264,7 @@ class Orchestrator:
             p = s.get(Project, project_id)
             if p.status != "awaiting_approval":
                 raise ValueError("O plano só pode ser alterado antes da aprovação")
-            team = list(s.scalars(select(Agent).where(Agent.organization_id == p.organization_id))) if p.organization_id else list(s.scalars(select(Agent)))
+            team = self.team_of(s, p)
             norm = self.validate_plan({"tarefas": [{"chave": t.get("key"), "titulo": t.get("title"), "descricao": t.get("description", ""), "tipo": {v: k for k, v in KIND_MAP.items()}.get(t.get("kind"), "geral"),
                                                     "agente_id": t.get("agentId"), "depende_de": t.get("dependsOn", []), "entregavel": t.get("deliverable", "")} for t in tasks]}, team)
             for t in s.scalars(select(Task).where(Task.project_id == project_id)):
@@ -315,7 +339,7 @@ class Orchestrator:
             p = s.get(Project, project_id)
             tasks = list(s.scalars(select(Task).where(Task.project_id == project_id)))
             report = s.scalars(select(Artifact).where(Artifact.project_id == project_id, Artifact.kind == "report")).first()
-            coord = self.coordinator_for(s, p.organization_id)
+            coord = self.coordinator_for(s, p)
             ok = report is not None and any(t.kind == "writing" and t.status == "done" for t in tasks)
             p.status = "delivered" if ok else "failed"
             if not ok:
@@ -335,7 +359,7 @@ class Orchestrator:
             p = s.get(Project, project_id)
             a = s.get(Agent, t.agent_id) if t.agent_id else None
             if a is None:
-                a = self.coordinator_for(s, p.organization_id)
+                a = self.coordinator_for(s, p)
             dep_tasks = list(s.scalars(select(Task).where(Task.project_id == project_id, Task.key.in_(t.depends_on or []))))
             inputs = []
             for d in dep_tasks:
@@ -615,7 +639,7 @@ class Orchestrator:
             a = s.get(Agent, agent_id)
             if not a:
                 raise ValueError("Agente não encontrado")
-            p = Project(organization_id=a.organization_id, title=title[:200], request=description or title, status="running", budget_usd=settings.default_project_budget_usd,
+            p = Project(owner_id=a.owner_id, organization_id=a.organization_id, title=title[:200], request=description or title, status="running", budget_usd=settings.default_project_budget_usd,
                         plan={"objetivo": title, "tarefa_avulsa": True})
             s.add(p)
             s.flush()
@@ -649,11 +673,59 @@ class Orchestrator:
             if not a:
                 raise ValueError("Agente não encontrado")
             s.expunge(a)
-        self.message(None, "solicitacao", text, from_kind="user", to_agent=agent_id)
+        self.message(None, "solicitacao", text, from_kind="user", to_agent=agent_id, owner=a.owner_id)
         msgs = [{"role": "system", "content": P.agent_system(a.config or {}, a.name, a.role)}] + [m for m in history[-10:] if m.get("role") in ("user", "assistant")] + [{"role": "user", "content": text}]
         r = await self.llm(project_id=None, task_id=None, agent=a, purpose="chat", messages=msgs, max_tokens=1200)
-        reply = self.message(None, "resposta", r.text, from_agent=agent_id, to_kind="user")
+        reply = self.message(None, "resposta", r.text, from_agent=agent_id, to_kind="user", owner=a.owner_id)
         return {"reply": r.text, "message": reply, "tokens": r.input_tokens + r.output_tokens, "costUsd": r.cost_usd}
+
+    def reanalyze(self, project_id: str, provider: str | None = None, model: str | None = None, apply_to_team: bool = False, note: str = ""):
+        """Refaz o planejamento do projeto (ex.: depois de trocar o modelo de IA).
+        Opcionalmente aplica provedor/modelo a todos os agentes da equipe antes de replanejar."""
+        with session_scope() as s:
+            p = s.get(Project, project_id)
+            if p.status in ("running", "revising") or project_id in self.runners:
+                raise ValueError("Pause ou aguarde a execução antes de reanalisar.")
+            if p.status == "completed":
+                raise ValueError("Projeto já concluído; crie um novo projeto.")
+            changed = 0
+            if apply_to_team and provider:
+                for a in self.team_of(s, p):
+                    cfg = dict(a.config or {})
+                    intel = dict(cfg.get("intelligence") or {})
+                    if intel.get("provider") != provider:
+                        intel["credentialId"] = None
+                    intel["provider"], intel["model"] = provider, (model or "")
+                    cfg["intelligence"] = intel
+                    a.config = cfg
+                    changed += 1
+            for t in s.scalars(select(Task).where(Task.project_id == project_id, Task.status.in_(["proposed", "pending", "failed", "cancelled"]))):
+                s.delete(t)
+            for a in s.scalars(select(Approval).where(Approval.project_id == project_id, Approval.status == "pending")):
+                a.status, a.decided_at, a.note = "superseded", utcnow(), "Projeto reanalisado"
+            p.status, p.error = "planning", ""
+        txt = "Reanálise solicitada pelo gestor" + (f" com {provider}/{model or 'modelo padrão'} aplicado a {changed} agente(s)" if changed else "") + (f". {note}" if note else ".")
+        self.message(project_id, "correcao", txt, from_kind="user", to_kind="agent")
+        self.project_event(project_id)
+        self.spawn(project_id, self.plan(project_id, note))
+        return changed
+
+    def retry_failed(self, project_id: str):
+        """Reexecuta tarefas que falharam (ex.: erro do provedor) mantendo as concluídas."""
+        with session_scope() as s:
+            p = s.get(Project, project_id)
+            if project_id in self.runners:
+                raise ValueError("O projeto já está em execução.")
+            tasks = list(s.scalars(select(Task).where(Task.project_id == project_id)))
+            again = [t for t in tasks if t.status in ("failed", "cancelled")]
+            if not tasks or p.status == "planning" or not again and p.status != "failed":
+                raise ValueError("Não há tarefas com falha para repetir. Use Reanalisar para refazer o plano.")
+            for t in again:
+                t.status, t.error, t.steps_done, t.step = "pending", "", 0, ""
+            p.status, p.error = "running", ""
+        self.message(project_id, "correcao", f"Gestor pediu nova tentativa de {len(again)} tarefa(s).", from_kind="user", to_kind="agent")
+        self.project_event(project_id)
+        self.spawn(project_id, self.run(project_id))
 
     def recover(self):
         """Retoma projetos interrompidos (ex.: reinício do app)."""

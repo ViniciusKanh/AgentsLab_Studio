@@ -58,7 +58,7 @@ export default function WorldPage({ envId: fixedEnv }: { envId?: string }) {
 
           {/* barra de ferramentas flutuante */}
           {!observer ? (
-            <div className="world-toolbar absolute left-3 top-3 flex flex-wrap items-center gap-1" data-testid="world-toolbar">
+            <div className="world-toolbar absolute left-2 right-2 top-2 flex flex-wrap items-center gap-1 sm:left-3 sm:right-auto sm:top-3" data-testid="world-toolbar">
               <div className="flex rounded-[7px] bg-[#070b17]/85 p-0.5" role="tablist" aria-label="Ambiente">
                 {ENVS.map((e) => (
                   <button key={e} role="tab" aria-selected={envId === e} onClick={() => nav(envPath(e))} className={cx('rounded-[6px] px-3 py-1.5 text-[11.5px] font-bold', envId === e ? 'bg-neon-green text-[#04120c]' : 'text-lab-muted hover:text-white')}>
@@ -89,9 +89,9 @@ export default function WorldPage({ envId: fixedEnv }: { envId?: string }) {
           )}
 
           {!observer && (
-            <div className="absolute right-3 top-3 flex gap-1.5">
-              <button className="px-btn sm ghost bg-[#070b17]/85" onClick={() => nav(`/agentes/novo?ambiente=${envId}`)}><UserPlus size={13} /> Novo agente</button>
-              <button className="px-btn sm solid" onClick={() => nav('/projetos?novo=1')} data-testid="new-project"><FolderPlus size={13} /> Novo projeto</button>
+            <div className="absolute bottom-24 right-3 flex gap-1.5 sm:bottom-auto sm:top-3">
+              <button className="px-btn sm ghost bg-[#070b17]/85" onClick={() => nav(`/agentes/novo?ambiente=${envId}`)} aria-label="Novo agente"><UserPlus size={13} /> <span className="hidden lg:inline">Novo agente</span></button>
+              <button className="px-btn sm solid" onClick={() => nav('/projetos?novo=1')} data-testid="new-project" aria-label="Novo projeto"><FolderPlus size={13} /> <span className="hidden sm:inline">Novo projeto</span></button>
             </div>
           )}
 

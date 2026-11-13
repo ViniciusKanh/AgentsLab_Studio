@@ -4,12 +4,16 @@ Os agentes só executam algo quando há uma credencial configurada para o proved
 """
 from __future__ import annotations
 
+import threading
+
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.db import session_scope
 from app.models import Agent, Department, Organization
 
-DEFAULT_MODEL = {"provider": "gemini", "model": "gemini-2.5-flash"}
+# model vazio = usa o "modelo padrão" escolhido pelo usuário em Provedores e Custos
+DEFAULT_MODEL = {"provider": "gemini", "model": ""}
 
 
 def agent_config(*, description: str, objective: str, character: str, color: str, env: str, station: str | None, instructions: str,
@@ -82,17 +86,47 @@ TEMPLATES = [
 ]
 
 
-def seed_organizations():
-    with session_scope() as s:
-        if s.scalars(select(Organization)).first():
+_seeded: set[str] = set()
+_lock = threading.Lock()
+
+
+def seed_for_owner(owner: str = "local") -> bool:
+    """Cria as organizações iniciais do usuário uma única vez (se ele apagá-las, não voltam).
+    Requisições simultâneas do mesmo usuário são serializadas (lock) e o marcador `seeded:<id>`
+    é gravado na mesma transação — em vários processos, a chave única evita duplicação."""
+    if owner in _seeded:
+        return False
+    with _lock:
+        if owner in _seeded:
             return False
+        try:
+            return _seed(owner)
+        except IntegrityError:  # outro processo semeou ao mesmo tempo
+            _seeded.add(owner)
+            return False
+
+
+def _seed(owner: str) -> bool:
+    from app.models import KeyValue, uid
+
+    with session_scope() as s:
+        flag = f"seeded:{owner}"
+        if s.get(KeyValue, flag) or s.scalars(select(Organization).where(Organization.owner_id == owner)).first():
+            if not s.get(KeyValue, flag):
+                s.add(KeyValue(key=flag, value={"at": "pre-existente"}))
+            _seeded.add(owner)
+            return False
+        s.add(KeyValue(key=flag, value={"at": "seed"}))
+        s.flush()  # garante o marcador antes de criar as organizações
         for org in (RESEARCH, OFFICE):
-            s.add(Organization(id=org["id"], name=org["name"], description=org["description"], template=org["template"], environment_id=org["environment_id"]))
+            oid = uid("org")
+            s.add(Organization(id=oid, owner_id=owner, name=org["name"], description=org["description"], template=org["template"], environment_id=org["environment_id"]))
             s.flush()
             for d in org["departments"]:
-                s.add(Department(organization_id=org["id"], name=d))
-            for (aid, name, role, dept, coord, char, color, station, desc, tools, internet) in org["agents"]:
+                s.add(Department(organization_id=oid, name=d))
+            for (_aid, name, role, dept, coord, char, color, station, desc, tools, internet) in org["agents"]:
                 cfg = agent_config(description=desc, objective=desc, character=char, color=color, env=org["environment_id"], station=station,
                                    instructions=f"Atue como {role}. {desc} Explique decisões e limitações.", tools=tools, internet=internet)
-                s.add(Agent(id=aid, organization_id=org["id"], name=name, role=role, department=dept, is_coordinator=coord, config=cfg))
+                s.add(Agent(id=uid("ag"), owner_id=owner, organization_id=oid, name=name, role=role, department=dept, is_coordinator=coord, config=cfg))
+    _seeded.add(owner)
     return True

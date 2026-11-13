@@ -6,7 +6,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.auth import CurrentUser
 from app.db import get_db
+from app.deps import user
 from app.models import Agent, Department, Organization
 from app.services.llm import LLMError
 from app.services.orchestrator import StopProject, agent_public, orchestrator
@@ -17,7 +19,7 @@ router = APIRouter(prefix="/api/v1", tags=["organizations"])
 
 def org_public(o: Organization, db: Session) -> dict:
     deps = list(db.scalars(select(Department).where(Department.organization_id == o.id)))
-    agents = list(db.scalars(select(Agent.id).where(Agent.organization_id == o.id)))
+    agents = list(db.scalars(select(Agent.id).where(Agent.organization_id == o.id, Agent.owner_id == o.owner_id)))
     return {"id": o.id, "name": o.name, "description": o.description, "template": o.template, "environmentId": o.environment_id,
             "departments": [{"id": d.id, "name": d.name, "description": d.description} for d in deps], "agentIds": agents,
             "createdAt": o.created_at.isoformat(), "origin": "real"}
@@ -36,20 +38,34 @@ class DepartmentIn(BaseModel):
     description: str = ""
 
 
+def own_org(db: Session, oid: str, u: CurrentUser) -> Organization:
+    o = db.get(Organization, oid)
+    if not o or o.owner_id != u.id:
+        _404("Organização")
+    return o
+
+
+def own_agent(db: Session, aid: str, u: CurrentUser) -> Agent:
+    a = db.get(Agent, aid)
+    if not a or a.owner_id != u.id:
+        _404("Agente")
+    return a
+
+
 @router.get("/organizations")
-def list_orgs(db: Session = Depends(get_db)):
-    return [org_public(o, db) for o in db.scalars(select(Organization).order_by(Organization.created_at))]
+def list_orgs(db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    return [org_public(o, db) for o in db.scalars(select(Organization).where(Organization.owner_id == u.id).order_by(Organization.created_at))]
 
 
 @router.get("/organization-templates")
-def templates():
+def templates(_u: CurrentUser = Depends(user)):
     return TEMPLATES
 
 
 @router.post("/organizations", status_code=201)
-def create_org(body: OrgIn, db: Session = Depends(get_db)):
+def create_org(body: OrgIn, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
     tpl = next((t for t in TEMPLATES if t["id"] == body.template), None)
-    o = Organization(name=body.name, description=body.description, template=body.template, environment_id=tpl["environmentId"] if tpl else body.environmentId)
+    o = Organization(owner_id=u.id, name=body.name, description=body.description, template=body.template, environment_id=tpl["environmentId"] if tpl else body.environmentId)
     db.add(o)
     db.flush()
     for d in body.departments or (tpl["departments"] if tpl else []):
@@ -59,24 +75,24 @@ def create_org(body: OrgIn, db: Session = Depends(get_db)):
 
 
 @router.put("/organizations/{oid}")
-def update_org(oid: str, body: OrgIn, db: Session = Depends(get_db)):
-    o = db.get(Organization, oid) or _404("Organização")
+def update_org(oid: str, body: OrgIn, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    o = own_org(db, oid, u)
     o.name, o.description, o.environment_id = body.name, body.description, body.environmentId
     db.commit()
     return org_public(o, db)
 
 
 @router.delete("/organizations/{oid}", status_code=204)
-def delete_org(oid: str, db: Session = Depends(get_db)):
-    o = db.get(Organization, oid) or _404("Organização")
+def delete_org(oid: str, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    o = own_org(db, oid, u)
     db.delete(o)
     db.commit()
     return Response(status_code=204)
 
 
 @router.post("/organizations/{oid}/departments", status_code=201)
-def add_department(oid: str, body: DepartmentIn, db: Session = Depends(get_db)):
-    db.get(Organization, oid) or _404("Organização")
+def add_department(oid: str, body: DepartmentIn, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    own_org(db, oid, u)
     d = Department(organization_id=oid, name=body.name, description=body.description)
     db.add(d)
     db.commit()
@@ -84,7 +100,8 @@ def add_department(oid: str, body: DepartmentIn, db: Session = Depends(get_db)):
 
 
 @router.delete("/organizations/{oid}/departments/{did}", status_code=204)
-def delete_department(oid: str, did: str, db: Session = Depends(get_db)):
+def delete_department(oid: str, did: str, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    own_org(db, oid, u)
     d = db.get(Department, did)
     if not d or d.organization_id != oid:
         _404("Departamento")
@@ -94,7 +111,7 @@ def delete_department(oid: str, did: str, db: Session = Depends(get_db)):
 
 
 # ------------------------------------------------------------------ agentes
-CORE = {"id", "name", "role", "department", "organizationId", "isCoordinator", "origin", "createdAt", "updatedAt", "stats", "level", "xp"}
+CORE = {"id", "name", "role", "department", "organizationId", "isCoordinator", "origin", "createdAt", "updatedAt", "stats", "level", "xp", "ownerId"}
 
 
 def _validate_agent(body: dict):
@@ -102,29 +119,31 @@ def _validate_agent(body: dict):
         if len(str(body.get(f, "")).strip()) < n:
             raise HTTPException(422, f"Campo '{f}' inválido")
     intel = body.get("intelligence") or {}
-    if intel.get("provider") not in ("gemini", "groq", "openai", "huggingface", "ollama") or not intel.get("model"):
-        raise HTTPException(422, "Provedor e modelo são obrigatórios")
+    if intel.get("provider") not in ("gemini", "groq", "openai", "huggingface", "ollama"):
+        raise HTTPException(422, "Provedor obrigatório (o modelo pode ficar vazio = padrão do provedor)")
 
 
 @router.get("/agents")
-def list_agents(organizationId: str | None = None, db: Session = Depends(get_db)):
-    q = select(Agent).order_by(Agent.created_at)
+def list_agents(organizationId: str | None = None, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    q = select(Agent).where(Agent.owner_id == u.id).order_by(Agent.created_at)
     if organizationId:
         q = q.where(Agent.organization_id == organizationId)
     return [agent_public(a) for a in db.scalars(q)]
 
 
 @router.get("/agents/{aid}")
-def get_agent(aid: str, db: Session = Depends(get_db)):
-    return agent_public(db.get(Agent, aid) or _404("Agente"))
+def get_agent(aid: str, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    return agent_public(own_agent(db, aid, u))
 
 
 @router.post("/agents", status_code=201)
-def create_agent(body: dict, db: Session = Depends(get_db)):
+def create_agent(body: dict, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
     _validate_agent(body)
+    if body.get("organizationId"):
+        own_org(db, body["organizationId"], u)
     base = agent_config(description="", objective="", character="analista", color="#00f5a0", env="office", station=None, instructions="", tools=[])
     cfg = {**base, **{k: v for k, v in body.items() if k not in CORE}}
-    a = Agent(name=body["name"].strip(), role=body["role"].strip(), department=body.get("department", ""), organization_id=body.get("organizationId"),
+    a = Agent(owner_id=u.id, name=body["name"].strip(), role=body["role"].strip(), department=body.get("department", ""), organization_id=body.get("organizationId"),
               is_coordinator=bool(body.get("isCoordinator")), config=cfg)
     db.add(a)
     db.commit()
@@ -132,8 +151,10 @@ def create_agent(body: dict, db: Session = Depends(get_db)):
 
 
 @router.put("/agents/{aid}")
-def update_agent(aid: str, body: dict, db: Session = Depends(get_db)):
-    a = db.get(Agent, aid) or _404("Agente")
+def update_agent(aid: str, body: dict, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    a = own_agent(db, aid, u)
+    if body.get("organizationId"):
+        own_org(db, body["organizationId"], u)
     _validate_agent({**agent_public(a), **body})
     a.name = body.get("name", a.name).strip()
     a.role = body.get("role", a.role).strip()
@@ -148,8 +169,8 @@ def update_agent(aid: str, body: dict, db: Session = Depends(get_db)):
 
 
 @router.delete("/agents/{aid}", status_code=204)
-def delete_agent(aid: str, db: Session = Depends(get_db)):
-    a = db.get(Agent, aid) or _404("Agente")
+def delete_agent(aid: str, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    a = own_agent(db, aid, u)
     db.delete(a)
     db.commit()
     return Response(status_code=204)
@@ -161,7 +182,8 @@ class ChatIn(BaseModel):
 
 
 @router.post("/agents/{aid}/chat")
-async def chat(aid: str, body: ChatIn):
+async def chat(aid: str, body: ChatIn, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    own_agent(db, aid, u)
     try:
         return await orchestrator.chat(aid, body.text, body.history)
     except ValueError as exc:
@@ -177,7 +199,8 @@ class AssignIn(BaseModel):
 
 
 @router.post("/agents/{aid}/tasks", status_code=201)
-async def assign(aid: str, body: AssignIn):
+async def assign(aid: str, body: AssignIn, db: Session = Depends(get_db), u: CurrentUser = Depends(user)):
+    own_agent(db, aid, u)
     try:
         return {"projectId": orchestrator.assign_task(aid, body.title, body.description, body.kind)}
     except ValueError as exc:

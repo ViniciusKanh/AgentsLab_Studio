@@ -1,3 +1,4 @@
+import { modelLabel } from '@/lib/format'
 import { useMemo, useRef, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Briefcase, Crosshair, ExternalLink, MessageSquare, Send, X } from 'lucide-react'
@@ -29,7 +30,7 @@ export function AgentContextPanel({ agent, onClose, onAssign }: { agent: Agent; 
   const busy = rt && rt.state !== 'idle' && rt.state !== 'paused'
 
   return (
-    <aside className="flex w-[330px] shrink-0 flex-col border-l border-lab-line/60 bg-[#0a1023]" data-testid="agent-panel">
+    <aside className="fixed inset-x-0 bottom-0 top-12 z-40 flex w-full flex-col border-l border-lab-line/60 bg-[#0a1023] md:static md:z-auto md:w-[330px] md:shrink-0" data-testid="agent-panel">
       <header className="flex items-start gap-3 border-b border-white/5 p-3">
         <Avatar characterId={agent.appearance.characterId} size={56} ring={meta.color} />
         <div className="min-w-0 flex-1">
@@ -67,7 +68,7 @@ export function AgentContextPanel({ agent, onClose, onAssign }: { agent: Agent; 
             </div>
             <dl className="grid grid-cols-[96px_1fr] gap-y-1.5">
               <dt className="text-lab-muted">Modelo</dt>
-              <dd className="flex items-center gap-1.5 truncate"><img src={providerIconUrl(agent.intelligence.provider)} className="pixel h-4 w-4" alt="" />{agent.intelligence.model}</dd>
+              <dd className="flex items-center gap-1.5 truncate"><img src={providerIconUrl(agent.intelligence.provider)} className="pixel h-4 w-4" alt="" />{modelLabel(agent.intelligence.model, useLabStore.getState().providers.find((x) => x.id === agent.intelligence.provider)?.defaultModel)}</dd>
               <dt className="text-lab-muted">Chave</dt>
               <dd className="truncate">{cred ? cred.alias : 'Padrão do provedor'}</dd>
               <dt className="text-lab-muted">Autonomia</dt><dd>{agent.rules.autonomy}</dd>
@@ -96,7 +97,7 @@ function AgentChat({ agent }: { agent: Agent }) {
     <div className="flex h-full flex-col" data-testid="agent-chat">
       {appConfig.mode !== 'real' && <p className="mb-2 rounded-[5px] border border-neon-gold/50 bg-neon-gold/10 p-2 text-[10.5px] text-neon-gold">Backend desconectado: o chat chama o modelo real do agente e só funciona com o servidor local ativo.</p>}
       <div className="min-h-[160px] flex-1 space-y-2">
-        {list.length === 0 && <p className="text-[11px] text-lab-muted">Converse com o agente. A resposta usa {agent.intelligence.provider}/{agent.intelligence.model} e entra no consumo registrado.</p>}
+        {list.length === 0 && <p className="text-[11px] text-lab-muted">Converse com o agente. A resposta usa {agent.intelligence.provider}/{modelLabel(agent.intelligence.model, useLabStore.getState().providers.find((x) => x.id === agent.intelligence.provider)?.defaultModel)} e entra no consumo registrado.</p>}
         {list.map((m) => (
           <div key={m.id} className={cx('max-w-[88%] rounded-[8px] px-2.5 py-1.5 text-[11.5px]', m.role === 'user' ? 'ml-auto bg-neon-purple/25' : m.role === 'system' ? 'bg-neon-pink/15 text-neon-pink' : 'bg-white/5')}>
             {m.text}

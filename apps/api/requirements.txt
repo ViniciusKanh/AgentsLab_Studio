@@ -9,4 +9,6 @@ litellm>=1.50
 keyring>=25
 cryptography>=43
 pytest>=8.0
-# Próximas fases: psycopg[binary] (PostgreSQL), redis (fila externa), pgvector
+# Autenticação (JWT do Supabase) e PostgreSQL (Supabase); próximas fases: redis, pgvector
+PyJWT[crypto]>=2.8
+psycopg[binary]>=3.2

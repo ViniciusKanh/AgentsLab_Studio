@@ -1,3 +1,4 @@
+import { modelLabel } from '@/lib/format'
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Activity, Copy, Pencil, Trash2 } from 'lucide-react'
@@ -52,7 +53,7 @@ export default function AgentProfilePage() {
         <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-3">
           <Panel accent="cyan" title="Resumo" className="lg:col-span-2">
             <dl className="grid grid-cols-[130px_1fr] gap-y-1.5 text-[12px]">
-              <dt className="text-lab-muted">Modelo</dt><dd className="flex items-center gap-1.5"><img src={providerIconUrl(a.intelligence.provider)} className="pixel h-4 w-4" alt="" /> {a.intelligence.model}</dd>
+              <dt className="text-lab-muted">Modelo</dt><dd className="flex items-center gap-1.5"><img src={providerIconUrl(a.intelligence.provider)} className="pixel h-4 w-4" alt="" /> {modelLabel(a.intelligence.model, useLabStore.getState().providers.find((x) => x.id === a.intelligence.provider)?.defaultModel)}</dd>
               <dt className="text-lab-muted">Papel</dt><dd>{a.role} · {a.department}</dd>
               <dt className="text-lab-muted">Ferramentas</dt><dd className="flex flex-wrap gap-1">{a.tools.length ? a.tools.map((t) => <Chip key={t} color="#9d62ff">{TOOLS_CATALOG.find((x) => x.id === t)?.name ?? t}</Chip>) : '—'}</dd>
               <dt className="text-lab-muted">Conhecimento</dt><dd>{a.knowledge.ragEnabled ? KNOWLEDGE_BASES.find((k) => k.id === a.knowledge.ragBaseId)?.name ?? a.knowledge.ragBaseId : 'Sem RAG'} · memória {a.knowledge.memory}</dd>

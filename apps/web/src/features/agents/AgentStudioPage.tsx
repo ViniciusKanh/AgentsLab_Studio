@@ -1,3 +1,4 @@
+import { modelLabel } from '@/lib/format'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, ArrowLeft, ArrowRight, Check, Plus, Save, ShieldCheck, Sparkles, X } from 'lucide-react'
@@ -100,7 +101,7 @@ export default function AgentStudioPage() {
             <p className="text-center text-[13px] font-extrabold">{draft.name || 'Novo agente'}</p>
             <p className="text-center text-[11px] text-lab-muted">{draft.role} · {draft.department}</p>
             <div className="flex flex-wrap justify-center gap-1">
-              <Chip color="#39d6ff"><img src={providerIconUrl(draft.intelligence.provider)} className="pixel h-3 w-3" alt="" />{draft.intelligence.model}</Chip>
+              <Chip color="#39d6ff"><img src={providerIconUrl(draft.intelligence.provider)} className="pixel h-3 w-3" alt="" />{modelLabel(draft.intelligence.model, useLabStore.getState().providers.find((x) => x.id === draft.intelligence.provider)?.defaultModel)}</Chip>
               {draft.knowledge.ragEnabled && <Chip color="#ffb800">RAG</Chip>}
               <Chip color="#9d62ff">{draft.rules.autonomy}</Chip>
             </div>
@@ -166,17 +167,16 @@ export default function AgentStudioPage() {
                 <p className="px-label">Provedor</p>
                 <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
                   {providers.map((p) => (
-                    <button key={p.id} onClick={() => patchIn('intelligence', { provider: p.id, model: p.defaultModel, credentialId: null })} className={cx('px-inset flex flex-col items-center gap-1 p-2 text-[11px] font-bold', draft.intelligence.provider === p.id && 'border-neon-green shadow-[0_0_8px_-2px_#00f5a0]')} aria-pressed={draft.intelligence.provider === p.id}>
+                    <button key={p.id} onClick={() => patchIn('intelligence', { provider: p.id, model: '', credentialId: null })} className={cx('px-inset flex flex-col items-center gap-1 p-2 text-[11px] font-bold', draft.intelligence.provider === p.id && 'border-neon-green shadow-[0_0_8px_-2px_#00f5a0]')} aria-pressed={draft.intelligence.provider === p.id}>
                       <img src={providerIconUrl(p.id)} className="pixel h-7 w-7" alt="" />{p.name}
                       <span className="text-[9px] font-normal text-lab-muted">{!real ? 'offline' : p.kind === 'local' ? 'local' : credentials.some((c) => c.provider === p.id) ? 'chave cadastrada' : 'sem chave'}</span>
                     </button>
                   ))}
                 </div>
                 <Grid>
-                  <Field label="Modelo" required error={errors.model}>
-                    <select className="px-input" value={draft.intelligence.model} onChange={(e) => patchIn('intelligence', { model: e.target.value })}>
-                      {provider?.models.map((m) => <option key={m.id} value={m.id}>{m.name} — {(m.contextWindow / 1000).toLocaleString('pt-BR')}K ctx</option>)}
-                    </select>
+                  <Field label="Modelo" error={errors.model} hint="Vazio = modelo padrão do provedor. Você pode digitar outro id.">
+                    <input className="px-input" list="studio-models" value={modelLabel(draft.intelligence.model, useLabStore.getState().providers.find((x) => x.id === draft.intelligence.provider)?.defaultModel)} onChange={(e) => patchIn('intelligence', { model: e.target.value.trim() })} placeholder={provider ? `padrão: ${provider.defaultModel}` : ''} data-testid="studio-model" />
+                    <datalist id="studio-models">{provider?.models.map((m) => <option key={m.id} value={m.id}>{m.name}{m.contextWindow ? ` — ${(m.contextWindow / 1000).toLocaleString('pt-BR')}K ctx` : ''}</option>)}</datalist>
                   </Field>
                   <Field label="Chave de API (perfil)" hint="Use chaves diferentes por agente para dividir cotas">
                     <select className="px-input" value={draft.intelligence.credentialId ?? ''} onChange={(e) => patchIn('intelligence', { credentialId: e.target.value || null })} data-testid="credential-select">
@@ -350,7 +350,7 @@ function DocumentsEditor({ docs, onChange }: { docs: string[]; onChange: (d: str
 function Review({ draft, errors }: { draft: AgentDraft; errors: Errors }) {
   const rows: [string, ReactNode][] = [
     ['Nome', draft.name || '—'], ['Papel', draft.role], ['Departamento', draft.department], ['Ambiente', ENVIRONMENTS.find((e) => e.id === draft.environmentId)?.name],
-    ['Objetivo', draft.objective || '—'], ['Modelo', `${draft.intelligence.provider} / ${draft.intelligence.model}`],
+    ['Objetivo', draft.objective || '—'], ['Modelo', `${draft.intelligence.provider} / ${modelLabel(draft.intelligence.model, useLabStore.getState().providers.find((x) => x.id === draft.intelligence.provider)?.defaultModel)}`],
     ['Comportamento', `${draft.intelligence.behavior} · temp ${draft.intelligence.temperature} · top-p ${draft.intelligence.topP}`],
     ['Ferramentas', draft.tools.join(', ') || '—'], ['Integrações', draft.integrations.join(', ') || '—'],
     ['Conhecimento', `${draft.knowledge.sources.join(', ') || 'sem fontes'} · memória ${draft.knowledge.memory} · RAG ${draft.knowledge.ragEnabled ? draft.knowledge.ragBaseId : 'desativado'}`],

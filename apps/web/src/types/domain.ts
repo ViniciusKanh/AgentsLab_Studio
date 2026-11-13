@@ -171,7 +171,7 @@ export type AgentDraft = Omit<Agent, 'id' | 'createdAt' | 'updatedAt' | 'stats' 
 export interface ModelInfo {
   id: string
   name: string
-  contextWindow: number
+  contextWindow: number | null
   /** USD por 1M tokens — valores ilustrativos no modo demo (sempre estimativa) */
   inputPer1M: number | null
   outputPer1M: number | null
@@ -189,6 +189,8 @@ export interface Provider {
   defaultModel: string
   models: ModelInfo[]
   usage: { tokensMonth: number; quotaMonth: number; costUsdMonth: number }
+  /** última sincronização da lista de modelos com a API do provedor */
+  modelsSyncedAt?: string | null
   origin: DataOrigin
 }
 

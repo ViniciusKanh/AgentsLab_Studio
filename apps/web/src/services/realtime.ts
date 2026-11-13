@@ -3,6 +3,7 @@ import type { AgentRuntimeState } from '@/types/domain'
 import { useSimulationStore } from '@/stores/simulationStore'
 import { useWorldStore } from '@/stores/worldStore'
 import { worldBus } from '@/world/events/bus'
+import { accessToken } from '@/stores/authStore'
 import { apiBase } from './backend'
 
 /**
@@ -14,6 +15,7 @@ type Listener = (e: PlatformEvent) => void
 const listeners = new Set<Listener>()
 let source: EventSource | null = null
 let connectedTo = ''
+let lastId = 0
 
 export function onPlatformEvent(fn: Listener) {
   listeners.add(fn)
@@ -54,23 +56,36 @@ export function dispatchPlatformEvent(e: PlatformEvent) {
   listeners.forEach((fn) => fn(e))
 }
 
-export function connectRealtime() {
+/**
+ * Conecta ao SSE do backend. EventSource não envia cabeçalhos, então o access token vai na URL
+ * (aceito pelo backend somente nesta rota). Ao renovar o token, reconecte com force=true.
+ */
+export async function connectRealtime(force = false) {
   const base = apiBase()
-  if (typeof EventSource === 'undefined' || (source && connectedTo === base)) return
+  const token = await accessToken()
+  const target = `${base}|${token ?? ''}`
+  if (typeof EventSource === 'undefined' || (source && connectedTo === target && !force)) return
   disconnectRealtime()
-  connectedTo = base
-  source = new EventSource(`${base}/api/v1/events`)
+  connectedTo = target
+  const qs = new URLSearchParams()
+  if (token) qs.set('access_token', token)
+  if (lastId) qs.set('after', String(lastId)) // reconexão manual: recupera eventos perdidos
+  source = new EventSource(`${base}/api/v1/events${qs.size ? `?${qs}` : ''}`)
   source.onmessage = (msg) => {
     try {
-      dispatchPlatformEvent(JSON.parse(msg.data) as PlatformEvent)
+      const ev = JSON.parse(msg.data) as PlatformEvent
+      if (ev.id <= lastId) return
+      lastId = ev.id
+      dispatchPlatformEvent(ev)
     } catch (err) {
       console.error('[AgentsLab] evento inválido', err)
     }
   }
 }
 
-export function disconnectRealtime() {
+export function disconnectRealtime(resetCursor = false) {
   source?.close()
   source = null
   connectedTo = ''
+  if (resetCursor) lastId = 0
 }

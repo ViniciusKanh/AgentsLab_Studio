@@ -20,12 +20,12 @@ class EventHub:
     def unsubscribe(self, q: asyncio.Queue):
         self._subs.discard(q)
 
-    def publish(self, type_: str, payload: dict[str, Any], project_id: str | None = None) -> dict:
+    def publish(self, type_: str, payload: dict[str, Any], project_id: str | None = None, owner_id: str = "local") -> dict:
         with session_scope() as s:
-            ev = Event(project_id=project_id, type=type_, payload=payload)
+            ev = Event(project_id=project_id, owner_id=owner_id, type=type_, payload=payload)
             s.add(ev)
             s.flush()
-            data = {"id": ev.id, "type": type_, "projectId": project_id, "payload": payload, "ts": ev.created_at.isoformat()}
+            data = {"id": ev.id, "type": type_, "projectId": project_id, "payload": payload, "ts": ev.created_at.isoformat(), "_owner": owner_id}
         for q in list(self._subs):
             try:
                 q.put_nowait(data)

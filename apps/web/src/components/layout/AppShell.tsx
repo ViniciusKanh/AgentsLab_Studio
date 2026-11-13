@@ -24,7 +24,7 @@ export function AppShell() {
       {!observer && <TopBar />}
       <div className="flex min-h-0 flex-1">
         {!observer && <Sidebar />}
-        <main className={cx('min-h-0 min-w-0 flex-1', immersive ? 'overflow-hidden' : 'overflow-y-auto overflow-x-hidden p-3')}>
+        <main className={cx('min-h-0 min-w-0 flex-1', immersive ? 'overflow-hidden' : 'overflow-y-auto overflow-x-hidden p-2 sm:p-3')}>
           <Outlet />
         </main>
       </div>

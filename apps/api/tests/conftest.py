@@ -13,9 +13,20 @@ from fakes import FakeLLM, FakeTools  # noqa: E402
 
 @pytest.fixture()
 def env(tmp_path):
-    db.configure(f"sqlite:///{tmp_path / 'test.db'}")
+    pg = os.environ.get("AGENTSLAB_TEST_DATABASE_URL")  # opcional: rodar a suíte em PostgreSQL real
+    if pg:
+        from sqlalchemy import create_engine
+
+        with create_engine(pg).begin() as conn:
+            conn.exec_driver_sql("DROP SCHEMA IF EXISTS agentslab CASCADE")
+        db.configure(pg)
+    else:
+        db.configure(f"sqlite:///{tmp_path / 'test.db'}")
     from app.main import init_db
 
+    from app.services import seed
+
+    seed._seeded.clear()
     init_db()
     store = vault.FernetFileStore(tmp_path / "secrets.enc", Fernet.generate_key().decode())
     vault.set_store(store)
@@ -36,6 +47,14 @@ def client(env):
 
     with TestClient(app) as c:
         yield c
+
+
+def org_id(client, name="Laboratório de Pesquisa em IA", headers=None):
+    return next(o["id"] for o in client.get("/api/v1/organizations", headers=headers or {}).json() if o["name"] == name)
+
+
+def agent_id(client, role, headers=None):
+    return next(a["id"] for a in client.get("/api/v1/agents", headers=headers or {}).json() if a["role"] == role)
 
 
 def wait_for(fn, timeout=15.0):

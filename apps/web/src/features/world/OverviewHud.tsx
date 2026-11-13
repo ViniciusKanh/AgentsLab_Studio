@@ -26,7 +26,7 @@ export function OverviewHud() {
 
   if (appConfig.mode !== 'real') {
     return (
-      <div className="absolute bottom-3 left-3 max-w-[300px] rounded-[8px] border border-neon-gold/50 bg-[#070b17]/92 p-3 text-[11px]" data-testid="overview-offline">
+      <div className="absolute bottom-3 left-3 right-3 max-w-[300px] rounded-[8px] border border-neon-gold/50 bg-[#070b17]/92 p-3 text-[11px]" data-testid="overview-offline">
         <p className="font-extrabold text-neon-gold">Backend desconectado</p>
         <p className="mt-1 text-lab-muted">Você está vendo agentes de exemplo. Nada é executado até o servidor local ser iniciado.</p>
         <Link to="/configuracoes" className="mt-1.5 inline-block font-bold text-neon-cyan">Configurar conexão →</Link>
@@ -36,7 +36,7 @@ export function OverviewHud() {
   if (!ov) return null
   const active = ov.projects.running + ov.projects.revising + ov.projects.planning
   return (
-    <div className="absolute bottom-3 left-3 w-[300px] rounded-[8px] border border-lab-line/70 bg-[#070b17]/92 p-3 text-[11px]" data-testid="overview-hud">
+    <div className="absolute bottom-3 left-3 hidden w-[300px] rounded-[8px] sm:block border border-lab-line/70 bg-[#070b17]/92 p-3 text-[11px]" data-testid="overview-hud">
       <p className="mb-2 font-extrabold">Visão geral</p>
       <div className="grid grid-cols-3 gap-1.5 text-center">
         <Stat label="Projetos ativos" value={fmtInt(active)} />

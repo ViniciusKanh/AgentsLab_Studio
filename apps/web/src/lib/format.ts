@@ -34,3 +34,5 @@ export const fmtClock = (isoStr: string) => new Date(isoStr).toLocaleTimeString(
 export const fmtDate = (isoStr: string) => new Date(isoStr).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 /** Custos de LLM costumam ser frações de centavo: até 4 casas. */
 export const fmtCost = (n: number) => `US$ ${n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: n < 1 ? 4 : 2 })}`
+/** Modelo efetivo exibido: vazio = padrão do provedor. */
+export const modelLabel = (model: string, providerDefault?: string) => model || (providerDefault ? `${providerDefault} (padrão)` : 'padrão do provedor')

@@ -10,6 +10,8 @@ Organization ─┬─ Department
                           ├─ Execution (chamadas de LLM: tokens/custo)
                           └─ Approval (decisões humanas)
 Event: log append-only usado para SSE com replay (reconexão).
+Isolamento: toda entidade raiz tem owner_id (id do usuário no Supabase Auth; "local" no modo desktop
+sem conta). Toda consulta da API filtra por owner_id.
 """
 from __future__ import annotations
 
@@ -33,6 +35,7 @@ def uid(prefix: str) -> str:
 class Organization(Base):
     __tablename__ = "organizations"
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: uid("org"))
+    owner_id: Mapped[str] = mapped_column(String(64), default="local", index=True)
     name: Mapped[str] = mapped_column(String(120))
     description: Mapped[str] = mapped_column(Text, default="")
     template: Mapped[str] = mapped_column(String(40), default="custom")
@@ -51,6 +54,7 @@ class Department(Base):
 class Agent(Base):
     __tablename__ = "agents"
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: uid("ag"))
+    owner_id: Mapped[str] = mapped_column(String(64), default="local", index=True)
     organization_id: Mapped[str | None] = mapped_column(ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True)
     name: Mapped[str] = mapped_column(String(80))
     role: Mapped[str] = mapped_column(String(120))
@@ -64,6 +68,7 @@ class Agent(Base):
 class Project(Base):
     __tablename__ = "projects"
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: uid("prj"))
+    owner_id: Mapped[str] = mapped_column(String(64), default="local", index=True)
     organization_id: Mapped[str | None] = mapped_column(ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True)
     title: Mapped[str] = mapped_column(String(200))
     request: Mapped[str] = mapped_column(Text)
@@ -107,6 +112,7 @@ class Task(Base):
 class AgentMessage(Base):
     __tablename__ = "agent_messages"
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: uid("msg"))
+    owner_id: Mapped[str] = mapped_column(String(64), default="local", index=True)
     project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
     task_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
     from_kind: Mapped[str] = mapped_column(String(10), default="agent")  # agent | user | system
@@ -166,6 +172,7 @@ class Evidence(Base):
 class Execution(Base):
     __tablename__ = "executions"
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: uid("exe"))
+    owner_id: Mapped[str] = mapped_column(String(64), default="local", index=True)
     project_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
     task_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
     agent_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
@@ -197,11 +204,19 @@ class Credential(Base):
     """Metadados do perfil de chave. O SEGREDO fica no cofre do SO (keyring) — nunca aqui."""
     __tablename__ = "credentials"
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: uid("cred"))
+    owner_id: Mapped[str] = mapped_column(String(64), default="local", index=True)
     provider: Mapped[str] = mapped_column(String(20))
     alias: Mapped[str] = mapped_column(String(80))
     last4: Mapped[str | None] = mapped_column(String(4), nullable=True)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class Secret(Base):
+    """Segredos criptografados (Fernet) — usado no servidor hospedado, onde não há cofre do SO."""
+    __tablename__ = "secrets"
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    value_enc: Mapped[str] = mapped_column(Text)
 
 
 class KeyValue(Base):
@@ -215,6 +230,7 @@ class Event(Base):
     __tablename__ = "events"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     project_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    owner_id: Mapped[str] = mapped_column(String(64), default="local", index=True)
     type: Mapped[str] = mapped_column(String(30))
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)

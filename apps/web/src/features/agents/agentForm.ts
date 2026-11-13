@@ -24,7 +24,7 @@ export function emptyDraft(defaults?: { name?: string; objective?: string; envir
     isCoordinator: false,
     stationId: null,
     intelligence: {
-      provider: 'gemini', model: 'gemini-2.5-flash', behavior: 'analitico', temperature: 0.4, topP: 0.9, maxOutputTokens: 2048, credentialId: null,
+      provider: 'gemini', model: '', behavior: 'analitico', temperature: 0.4, topP: 0.9, maxOutputTokens: 2048, credentialId: null,
       instructions: 'Você é um agente do AgentsLab_Studio. Responda em português do Brasil, cite fontes verificáveis e explique suas decisões.',
     },
     tools: ['literature_search'],
@@ -67,7 +67,9 @@ export function validateStep(step: StepId, d: AgentDraft, providerModels: Record
     if (d.objective.trim().length < 10) e.objective = 'Descreva o objetivo (mín. 10 caracteres).'
   }
   if (step === 'inteligencia' || step === 'revisao') {
-    if (!providerModels[d.intelligence.provider]?.includes(d.intelligence.model)) e.model = 'Selecione um modelo do provedor escolhido.'
+    // vazio = modelo padrão do provedor; ids fora da lista são aceitos (modelos novos/descontinuados mudam com frequência)
+    if (d.intelligence.model && d.intelligence.model.length > 120) e.model = 'Id de modelo inválido.'
+    void providerModels
     if (d.intelligence.instructions.trim().length < 20) e.instructions = 'Instruções de sistema devem ter pelo menos 20 caracteres.'
     if (d.intelligence.temperature < 0 || d.intelligence.temperature > 2) e.temperature = 'Temperatura entre 0 e 2.'
     if (d.intelligence.maxOutputTokens < 64 || d.intelligence.maxOutputTokens > 32000) e.maxOutputTokens = 'Entre 64 e 32.000 tokens.'

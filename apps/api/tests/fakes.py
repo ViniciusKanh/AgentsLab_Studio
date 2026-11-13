@@ -12,13 +12,25 @@ PLAN = {
     "objetivo": "Mapear aplicações de IA na aeronáutica", "escopo": "Literatura 2019+", "subtemas": ["manutenção preditiva", "visão computacional"],
     "entregaveis": ["Relatório técnico"], "criterios_qualidade": ["citações verificáveis"],
     "tarefas": [
-        {"chave": "T1", "titulo": "Pesquisar manutenção preditiva", "descricao": "Literatura científica", "tipo": "pesquisa", "agente_id": "ag-pesq-cientifico", "depende_de": [], "entregavel": "Achados"},
-        {"chave": "T2", "titulo": "Pesquisar aplicações em inspeção", "descricao": "Casos aeronáuticos", "tipo": "pesquisa", "agente_id": "ag-pesq-aero", "depende_de": [], "entregavel": "Achados"},
-        {"chave": "T3", "titulo": "Comparar abordagens", "descricao": "Tabela comparativa", "tipo": "analise", "agente_id": "ag-analista-tec", "depende_de": ["T1", "T2"], "entregavel": "Análise"},
-        {"chave": "T4", "titulo": "Redigir relatório", "descricao": "Documento final", "tipo": "redacao", "agente_id": "ag-redator", "depende_de": ["T3"], "entregavel": "Relatório"},
-        {"chave": "T5", "titulo": "Revisar relatório", "descricao": "Qualidade", "tipo": "revisao", "agente_id": "ag-revisor-cient", "depende_de": ["T4"], "entregavel": "Parecer"},
+        {"chave": "T1", "titulo": "Pesquisar manutenção preditiva", "descricao": "Literatura científica", "tipo": "pesquisa", "agente_id": "@Pesquisador Científico", "depende_de": [], "entregavel": "Achados"},
+        {"chave": "T2", "titulo": "Pesquisar aplicações em inspeção", "descricao": "Casos aeronáuticos", "tipo": "pesquisa", "agente_id": "@Pesquisador de Aplicações", "depende_de": [], "entregavel": "Achados"},
+        {"chave": "T3", "titulo": "Comparar abordagens", "descricao": "Tabela comparativa", "tipo": "analise", "agente_id": "@Analista Técnico", "depende_de": ["T1", "T2"], "entregavel": "Análise"},
+        {"chave": "T4", "titulo": "Redigir relatório", "descricao": "Documento final", "tipo": "redacao", "agente_id": "@Redator Técnico-Científico", "depende_de": ["T3"], "entregavel": "Relatório"},
+        {"chave": "T5", "titulo": "Revisar relatório", "descricao": "Qualidade", "tipo": "revisao", "agente_id": "@Revisor Científico", "depende_de": ["T4"], "entregavel": "Parecer"},
     ],
 }
+
+
+def plan_for(prompt: str) -> dict:
+    """Troca "@Papel" pelo id real do agente listado no prompt do coordenador."""
+    import re
+
+    by_role = {m.group(3).strip(): m.group(1) for m in re.finditer(r"- id=(\S+) \| ([^|]+)\| ([^|]+)\|", prompt)}
+    plan = json.loads(json.dumps(PLAN))
+    for t in plan["tarefas"]:
+        if t["agente_id"].startswith("@"):
+            t["agente_id"] = by_role.get(t["agente_id"][1:], "desconhecido")
+    return plan
 
 
 class FakeLLM:
@@ -36,7 +48,7 @@ class FakeLLM:
         if self.delay:
             await asyncio.sleep(self.delay)
         text = {
-            "plan": json.dumps(PLAN),
+            "plan": json.dumps(plan_for(messages[-1]["content"])),
             "queries": json.dumps({"consultas": ["predictive maintenance aircraft machine learning"], "ano_minimo": 2019}),
             "findings": "## Achados\nModelos LSTM preveem falhas em motores [E1]. Inspeção por visão computacional [E2].",
             "analysis": "## Análise\n| Abordagem | Fonte |\n|---|---|\n| LSTM | [E1] |\n| CNN | [E2] |",

@@ -20,6 +20,9 @@ O AgentsLab_Studio é uma **plataforma real de organizações multiagentes com v
 14. Classes visuais compartilhadas em `@layer components`. Seletores Zustand não criam arrays/objetos novos.
 15. `useEffect(() => { ... })` com chaves (evita retornar Promise).
 16. Compatibilidade com Windows; sem commits/push/deploy sem autorização.
+17. **Autenticação = Supabase Auth.** Nunca criar armazenamento de senhas/tokens próprio. Frontend só com a chave publicável; backend valida JWT (`app/auth.py`) e **toda** consulta filtra por `owner_id` (recurso de outro usuário → 404).
+18. Nova tabela no backend: incluir `owner_id` (ou herdar do pai), atualizar `supabase/migrations/*_agentslab_security.sql` e `_NEW_COLUMNS` em `app/main.py` para bancos existentes.
+19. Chamadas ao backend sempre via `services/http.ts` (`apiFetch`) — inclui o token. Telas novas precisam funcionar em 390 px de largura.
 
 ## Verificação antes de concluir
 ```

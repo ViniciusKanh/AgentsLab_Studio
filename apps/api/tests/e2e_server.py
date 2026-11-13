@@ -1,6 +1,7 @@
 """
 Servidor da API para os testes E2E (Playwright) — SOMENTE TESTES.
-Banco temporário, cofre em arquivo e LLM/ferramentas determinísticos (tests/fakes.py),
+Banco temporário, cofre em arquivo, autenticação por JWT do Supabase falso e LLM/ferramentas
+determinísticos (tests/fakes.py),
 para validar a interface sem depender de rede nem de chaves reais.
 
 Uso: python tests/e2e_server.py  (porta 8010)
@@ -18,6 +19,10 @@ tmp = tempfile.mkdtemp(prefix="agentslab-e2e-")
 os.environ["AGENTSLAB_DATA_DIR"] = tmp
 os.environ["AGENTSLAB_DATABASE_URL"] = f"sqlite:///{tmp}/e2e.db"
 os.environ.setdefault("AGENTSLAB_CORS_ORIGINS", "http://localhost:4173,http://127.0.0.1:4173,http://localhost:5173")
+# autenticação: com FAKE_SUPABASE_SECRET, valida os JWT do Supabase falso (tests/fake_supabase.py);
+# sem ela, roda no modo local de usuário único
+if os.environ.get("FAKE_SUPABASE_SECRET"):
+    os.environ.setdefault("AGENTSLAB_SUPABASE_JWT_SECRET", os.environ["FAKE_SUPABASE_SECRET"])
 
 import uvicorn  # noqa: E402
 

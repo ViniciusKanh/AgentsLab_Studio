@@ -28,3 +28,4 @@ docs/media/.video-tmp/
 apps/api/tests/.data/
 *.db
 secrets.enc
+dist-e2e/

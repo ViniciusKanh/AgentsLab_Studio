@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Plug, RotateCcw, Settings, ShieldCheck } from 'lucide-react'
+import { KeyRound, LogOut, Plug, RotateCcw, Save, Settings, ShieldCheck, UserRound } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { displayName, useAuthStore } from '@/stores/authStore'
 import { appConfig } from '@/services/config'
 import { useBackendStore } from '@/services/backend'
 import { platform } from '@/services/platform'
@@ -34,9 +36,10 @@ export default function SettingsPage() {
     <div className="flex flex-col gap-2.5" data-testid="settings-page">
       <div className="px-panel c-purple flex items-center gap-3 px-3 py-2">
         <Settings size={30} className="text-neon-purple" />
-        <div><h1 className="title-pixel text-[15px]">Configurações</h1><p className="text-[12px] text-lab-muted">Conexão com o backend local, segurança e preferências.</p></div>
+        <div><h1 className="title-pixel text-[15px]">Configurações</h1><p className="text-[12px] text-lab-muted">Conta, conexão com o backend, segurança e preferências.</p></div>
       </div>
       <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-2">
+        <AccountPanel />
         <Panel accent="green" title="Conexão com o backend">
           <div className="space-y-2 text-[12px]">
             <p>Status: {status === 'online' ? <Chip color="#00f5a0">Conectado{version ? ` · API ${version}` : ''}</Chip> : status === 'checking' ? <Chip color="#8b97c4">Verificando…</Chip> : <Chip color="#ffb800">Desconectado</Chip>}</p>
@@ -75,5 +78,35 @@ export default function SettingsPage() {
       </div>
       <ConfirmModal open={confirm} onClose={() => setConfirm(false)} onConfirm={() => void resetDemo()} title="Restaurar exemplos" message="Os agentes de exemplo locais serão restaurados." confirmLabel="Restaurar" />
     </div>
+  )
+}
+
+function AccountPanel() {
+  const { enabled, user, updateProfile, signOut } = useAuthStore()
+  const toast = useUiStore((s) => s.toast)
+  const [name, setName] = useState(displayName(user))
+  if (!enabled) {
+    return (
+      <Panel accent="purple" title="Conta">
+        <p className="text-[12px] text-lab-muted">Modo local de usuário único: contas (Supabase Auth) não configuradas. Para publicar com login, veja <b>docs/SUPABASE.md</b>.</p>
+      </Panel>
+    )
+  }
+  return (
+    <Panel accent="purple" title="Conta" data-testid="account-panel">
+      <div className="space-y-2 text-[12px]">
+        <p className="flex items-center gap-2"><UserRound size={15} className="text-neon-purple" /> {user?.email}{user?.email_confirmed_at && <Chip color="#00f5a0">e-mail confirmado</Chip>}</p>
+        <Field label="Nome completo">
+          <div className="flex gap-1.5">
+            <input className="px-input" value={name} onChange={(e) => setName(e.target.value)} />
+            <button className="px-btn sm" disabled={name.trim().length < 3} onClick={() => void updateProfile(name).then((e) => toast(e ?? 'Perfil atualizado', e ? 'error' : 'success'))}><Save size={13} /> Salvar</button>
+          </div>
+        </Field>
+        <div className="flex flex-wrap gap-1.5">
+          <Link to="/redefinir-senha" className="px-btn sm ghost"><KeyRound size={13} /> Alterar senha</Link>
+          <button className="px-btn sm" style={{ ['--c' as string]: '#ff537a' }} onClick={() => void signOut()} data-testid="settings-logout"><LogOut size={13} /> Sair</button>
+        </div>
+      </div>
+    </Panel>
   )
 }

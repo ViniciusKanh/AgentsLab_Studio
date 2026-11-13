@@ -2,10 +2,9 @@ import { appConfig } from './config'
 import type { LabDataSource } from './dataSource'
 import { createDemoDataSource } from './demo/demoDataSource'
 import { createApiDataSource } from './api/apiDataSource'
-import { apiBase } from './backend'
 
 const demo = createDemoDataSource()
-const real = createApiDataSource(apiBase)
+const real = createApiDataSource()
 
 /**
  * Fonte de dados ativa, decidida em tempo de execução:

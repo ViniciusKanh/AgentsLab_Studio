@@ -1,7 +1,7 @@
 /**
  * Captura de mídia do AgentsLab_Studio (screenshots, vídeo e GIF) para o README.
  *
- * Uso:  npm run build && npm run preview -- --port 4173 &   (ou deixe o script subir o preview)
+ * Uso:  npm run media   (sobe preview, Supabase Auth falso e API de teste automaticamente)
  *       node scripts/capture-media.mjs [--out ../../docs/media] [--base http://localhost:4173]
  *
  * Requer: Playwright (chromium), Python com as dependências de apps/api e ffmpeg (opcional).
@@ -25,36 +25,66 @@ async function serverUp() {
   try { const r = await fetch(BASE); return r.ok } catch { return false }
 }
 
-let preview = null
-if (!(await serverUp())) {
-  preview = spawn(process.platform === 'win32' ? 'npx.cmd' : 'npx', ['vite', 'preview', '--port', '4173', '--strictPort'], { stdio: 'ignore', shell: process.platform === 'win32' })
-  for (let i = 0; i < 60 && !(await serverUp()); i++) await new Promise((r) => setTimeout(r, 500))
+const PY = process.env.PYTHON ?? (process.platform === 'win32' ? 'python' : 'python3')
+const SECRET = 'segredo-e2e-com-pelo-menos-32-caracteres!!'
+const AUTH = 'http://127.0.0.1:8020'
+const API = 'http://127.0.0.1:8010'
+const up = async (url) => { try { return (await fetch(url)).ok } catch { return false } }
+const wait = async (url) => { for (let i = 0; i < 80 && !(await up(url)); i++) await new Promise((r) => setTimeout(r, 500)) }
+const procs = []
+
+// build com o Supabase Auth FALSO dos testes (somente para as capturas)
+if (!(await up(BASE))) {
+  const env = { ...process.env, VITE_SUPABASE_URL: AUTH, VITE_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_midia', VITE_SITE_URL: BASE }
+  spawnSync(process.platform === 'win32' ? 'npx.cmd' : 'npx', ['vite', 'build', '--outDir', 'dist-e2e'], { stdio: 'inherit', env, shell: process.platform === 'win32' })
+  procs.push(spawn(process.platform === 'win32' ? 'npx.cmd' : 'npx', ['vite', 'preview', '--outDir', 'dist-e2e', '--port', '4173', '--strictPort'], { stdio: 'ignore', shell: process.platform === 'win32' }))
+  await wait(BASE)
+}
+if (!(await up(AUTH + '/__mail'))) {
+  procs.push(spawn(PY, ['tests/fake_supabase.py'], { cwd: resolve('../api'), stdio: 'ignore', env: { ...process.env, FAKE_SUPABASE_SECRET: SECRET } }))
+  await wait(AUTH + '/__mail')
+}
+if (!(await up(API + '/health'))) {
+  procs.push(spawn(PY, ['tests/e2e_server.py'], { cwd: resolve('../api'), stdio: 'ignore', env: { ...process.env, FAKE_SUPABASE_SECRET: SECRET, E2E_LLM_DELAY: '1.2' } }))
+  await wait(API + '/health')
 }
 
-const API = 'http://127.0.0.1:8010'
-async function apiUp() {
-  try { const r = await fetch(API + '/health'); return r.ok } catch { return false }
-}
-let api = null
-if (!(await apiUp())) {
-  const py = process.env.PYTHON ?? (process.platform === 'win32' ? 'python' : 'python3')
-  api = spawn(py, ['tests/e2e_server.py'], { cwd: resolve('../api'), stdio: 'ignore', env: { ...process.env, E2E_LLM_DELAY: '1.2' } })
-  for (let i = 0; i < 60 && !(await apiUp()); i++) await new Promise((r) => setTimeout(r, 500))
-}
+// usuário de demonstração confirmado + token para chamadas diretas à API
+const EMAIL = `midia-${Date.now()}@agentslab.dev`, PASS = 'Senha#Midia123'
+const jpost = (url, body, headers = {}) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) }).then((r) => r.json())
+await jpost(`${AUTH}/auth/v1/signup`, { email: EMAIL, password: PASS, data: { full_name: 'Vinicius Santos' } })
+const mails = await (await fetch(`${AUTH}/__mail?to=${EMAIL}`)).json()
+await jpost(`${AUTH}/auth/v1/verify`, { token_hash: new URL(mails.at(-1).link).searchParams.get('token_hash'), type: 'signup' })
+const { access_token: TOKEN } = await jpost(`${AUTH}/auth/v1/token?grant_type=password`, { email: EMAIL, password: PASS })
+const AUTHZ = { Authorization: `Bearer ${TOKEN}` }
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0
 const browser = await chromium.launch()
 const shots = []
+// sessão logada reutilizada em todas as capturas
+let storageState
+{
+  const ctx = await browser.newContext({ viewport: VIEW })
+  await ctx.addInitScript((url) => localStorage.setItem('agentslab:backend:v1', JSON.stringify({ state: { baseUrl: url }, version: 0 })), API)
+  const p = await ctx.newPage()
+  await p.goto(BASE + '/entrar')
+  await p.getByTestId('login-email').fill(EMAIL)
+  await p.getByTestId('login-password').fill(PASS)
+  await p.getByTestId('login-submit').click()
+  await p.getByTestId('topbar').waitFor()
+  storageState = await ctx.storageState()
+  await ctx.close()
+}
 
 async function page(ctxOpts = {}) {
-  const ctx = await browser.newContext({ viewport: VIEW, deviceScaleFactor: 1, ...ctxOpts })
+  const ctx = await browser.newContext({ viewport: VIEW, deviceScaleFactor: 1, storageState: ctxOpts.anon ? undefined : storageState, ...ctxOpts, anon: undefined })
   await ctx.addInitScript((url) => localStorage.setItem('agentslab:backend:v1', JSON.stringify({ state: { baseUrl: url }, version: 0 })), API)
   const p = await ctx.newPage()
   return { ctx, p }
 }
 
-async function shot(path, name, waitMs = 2500, action) {
-  const { ctx, p } = await page()
+async function shot(path, name, waitMs = 2500, action, opts = {}) {
+  const { ctx, p } = await page(opts)
   await p.goto(BASE + path, { waitUntil: 'networkidle' })
   await p.waitForTimeout(waitMs)
   if (action) await action(p)
@@ -66,12 +96,13 @@ async function shot(path, name, waitMs = 2500, action) {
 
 /** Cria um projeto pela API (o mesmo endpoint que a interface usa) e aprova o plano. */
 async function startProject() {
-  const post = (path, body) => fetch(API + '/api/v1' + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json())
-  const creds = await fetch(API + '/api/v1/credentials').then((r) => r.json())
+  const post = (path, body) => jpost(API + '/api/v1' + path, body, AUTHZ)
+  const creds = await fetch(API + '/api/v1/credentials', { headers: AUTHZ }).then((r) => r.json())
   if (!creds.length) await post('/credentials', { provider: 'gemini', alias: 'Gemini · chave de teste', api_key: 'chave-de-teste-0000' })
-  const p = await post('/projects', { organizationId: 'org-pesquisa-ia', title: 'IA na aeronáutica', request: 'Pesquise aplicações de inteligência artificial na aeronáutica e entregue um relatório técnico com fontes verificáveis.' })
+  const orgs = await fetch(API + '/api/v1/organizations', { headers: AUTHZ }).then((r) => r.json())
+  const p = await post('/projects', { organizationId: orgs.find((o) => o.name === 'Laboratório de Pesquisa em IA').id, title: 'IA na aeronáutica', request: 'Pesquise aplicações de inteligência artificial na aeronáutica e entregue um relatório técnico com fontes verificáveis.' })
   for (let i = 0; i < 60; i++) {
-    const s = await fetch(API + '/api/v1/projects/' + p.id).then((r) => r.json())
+    const s = await fetch(API + '/api/v1/projects/' + p.id, { headers: AUTHZ }).then((r) => r.json())
     if (s.status === 'awaiting_approval') break
     await new Promise((r) => setTimeout(r, 300))
   }
@@ -100,6 +131,9 @@ async function record(path, name, seconds, action) {
 }
 
 try {
+  await shot('/entrar', 'login', 1200, null, { anon: true, viewport: { width: 1672, height: 941 } })
+  await shot('/cadastro', 'cadastro', 1200, null, { anon: true, viewport: { width: 1672, height: 941 } })
+  await shot('/entrar', 'login-celular', 1200, null, { anon: true, viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })
   await shot('/escritorio', 'escritorio', 9000)
   await shot('/laboratorio', 'laboratorio', 9000)
   await shot('/escritorio', 'escritorio-zoom', 6000, async (p) => {
@@ -115,7 +149,7 @@ try {
   const pid = await startProject()
   await shot(`/projetos/${pid}`, 'projeto-plano', 1500)
   await record('/laboratorio', 'demo-laboratorio', 16, async () => {
-    await fetch(`${API}/api/v1/projects/${pid}/plan/decision`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ approve: true }) })
+    await jpost(`${API}/api/v1/projects/${pid}/plan/decision`, { approve: true }, AUTHZ)
   })
   await shot(`/projetos/${pid}`, 'projeto-entrega', 8000, async (p) => {
     await p.getByRole('tab', { name: /Documentos/ }).click()
@@ -129,7 +163,6 @@ try {
   console.log(`Mídia gerada em ${OUT}:\n` + shots.map((s) => ' - ' + s).join('\n') + (hasFfmpeg ? '\n(+ GIF e MP4)' : '\n(ffmpeg ausente: sem GIF/MP4)'))
 } finally {
   await browser.close()
-  preview?.kill()
-  api?.kill()
+  procs.forEach((p) => p.kill())
 }
 if (!existsSync(OUT)) process.exit(1)

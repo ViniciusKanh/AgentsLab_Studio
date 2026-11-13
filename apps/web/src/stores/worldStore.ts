@@ -15,6 +15,9 @@ interface WorldUiState {
   observer: boolean
   management: boolean
   sidebarCollapsed: boolean
+  /** menu lateral aberto no celular (não persistido) */
+  mobileNav: boolean
+  setMobileNav: (v: boolean) => void
   feedOpen: boolean
   feed: FeedItem[]
   selectedProp: { prop: WorldProp; envId: string } | null
@@ -38,6 +41,8 @@ export const useWorldStore = create<WorldUiState>()(
       observer: false,
       management: false,
       sidebarCollapsed: false,
+      mobileNav: false,
+      setMobileNav: (v) => set({ mobileNav: v }),
       feedOpen: true,
       feed: [],
       selectedProp: null,

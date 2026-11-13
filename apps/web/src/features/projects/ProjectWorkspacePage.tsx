@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Check, Download, FileText, GitCompare, MessageSquarePlus, Pause, Play, Plus, Send, Square, Trash2, X } from 'lucide-react'
+import { ArrowLeft, Check, RefreshCcw, RotateCw, Download, FileText, GitCompare, MessageSquarePlus, Pause, Play, Plus, Send, Square, Trash2, X } from 'lucide-react'
 import type { AgentMessage, Artifact, ArtifactContent, Evidence, Execution, Project, ProjectTask } from '@/types/platform'
 import { appConfig } from '@/services/config'
 import { MESSAGE_TYPE, platform, PROJECT_STATUS, TASK_KIND } from '@/services/platform'
@@ -8,6 +8,7 @@ import { onPlatformEvent } from '@/services/realtime'
 import { useLabStore } from '@/stores/labStore'
 import { useUiStore } from '@/stores/uiStore'
 import { Avatar, Chip, Field, Panel, ProgressBar, Tabs, cx } from '@/components/ui/primitives'
+import { Modal } from '@/components/ui/Modal'
 import { Markdown } from '@/components/ui/Markdown'
 import { OfflineNotice } from '@/components/ui/OfflineNotice'
 import { fmtClock, fmtCost, fmtDate, fmtInt } from '@/lib/format'
@@ -30,6 +31,7 @@ export default function ProjectWorkspacePage() {
   const [executions, setExecutions] = useState<Execution[]>([])
   const [tab, setTab] = useState<T>('tarefas')
   const [error, setError] = useState('')
+  const [reanalyze, setReanalyze] = useState(false)
   const real = appConfig.mode === 'real'
 
   const load = useCallback(async () => {
@@ -77,6 +79,8 @@ export default function ProjectWorkspacePage() {
         <div className="flex gap-1.5">
           {['running', 'revising'].includes(project.status) && <button className="px-btn sm" style={{ ['--c' as string]: '#ffb800' }} onClick={() => void act(() => platform.control(project.id, 'pause'), 'Execução pausada')}><Pause size={13} /> Pausar</button>}
           {project.status === 'paused' && <button className="px-btn sm solid" onClick={() => void act(() => platform.control(project.id, 'resume'), 'Execução retomada')}><Play size={13} /> Retomar</button>}
+          {['failed', 'awaiting_approval', 'paused', 'delivered', 'cancelled'].includes(project.status) && <button className="px-btn sm" style={{ ['--c' as string]: '#39d6ff' }} onClick={() => setReanalyze(true)} data-testid="project-reanalyze"><RefreshCcw size={13} /> Reanalisar</button>}
+          {(project.tasks ?? []).some((t) => t.status === 'failed' || t.status === 'cancelled') && ['failed', 'paused'].includes(project.status) && <button className="px-btn sm" onClick={() => void act(() => platform.retry(project.id), 'Tarefas com falha reenviadas')} data-testid="project-retry"><RotateCw size={13} /> Repetir falhas</button>}
           {!['completed', 'cancelled', 'failed'].includes(project.status) && <button className="px-btn sm" style={{ ['--c' as string]: '#ff537a' }} onClick={() => void act(() => platform.control(project.id, 'cancel'), 'Projeto cancelado')} data-testid="project-cancel"><Square size={13} /> Cancelar</button>}
         </div>
       </div>
@@ -96,6 +100,7 @@ export default function ProjectWorkspacePage() {
       {tab === 'documentos' && <Documents project={project} artifacts={artifacts} onFeedback={load} />}
       {tab === 'evidencias' && <EvidenceTable evidence={evidence} />}
       {tab === 'custos' && <ExecutionsTable executions={executions} />}
+      {reanalyze && <ReanalyzeModal project={project} onClose={() => setReanalyze(false)} onDone={load} />}
     </div>
   )
 }
@@ -291,7 +296,7 @@ function Documents({ project, artifacts, onFeedback }: { project: Project; artif
             {art.versions.map((x) => <option key={x.version} value={x.version}>v{x.version} · {fmtDate(x.createdAt)}</option>)}
           </select>
           {art.currentVersion > 1 && <button className="px-btn sm ghost" onClick={() => void platform.diff(project.id, art.id, Math.max(1, (v ?? 2) - 1), v ?? 2).then((d) => setDiff(d.diff))} disabled={(v ?? 1) < 2} title="Comparar com a versão anterior"><GitCompare size={13} /> Diff</button>}
-          <a className="px-btn sm" href={platform.downloadUrl(project.id, art.id, v)} download><Download size={13} /> .md</a>
+          <button className="px-btn sm" onClick={() => void platform.download(project.id, art.id, v).catch((e: Error) => toast(e.message, 'error'))}><Download size={13} /> .md</button>
         </div>
       }>
         {content?.note && <p className="mb-2 text-[10.5px] text-lab-muted">Nota da versão: {content.note}</p>}
@@ -366,5 +371,59 @@ function ExecutionsTable({ executions }: { executions: Execution[] }) {
         </div>
       )}
     </Panel>
+  )
+}
+
+/** Reanalisar: refaz o plano — opcionalmente trocando provedor/modelo de toda a equipe. */
+function ReanalyzeModal({ project, onClose, onDone }: { project: Project; onClose: () => void; onDone: () => void }) {
+  const providers = useLabStore((s) => s.providers)
+  const agents = useLabStore((s) => s.agents)
+  const reload = useLabStore((s) => s.load)
+  const toast = useUiStore((s) => s.toast)
+  const team = agents.filter((a) => !project.organizationId || a.organizationId === project.organizationId)
+  const enabled = providers.filter((p) => p.enabled)
+  const [apply, setApply] = useState(/404|NotFound|no longer|desativado|not found|descontinu/i.test(project.error))
+  const [provider, setProvider] = useState(team[0]?.intelligence.provider ?? enabled[0]?.id ?? 'gemini')
+  const prov = providers.find((p) => p.id === provider)
+  const [model, setModel] = useState('')
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const submit = async () => {
+    setBusy(true)
+    try {
+      const r = await platform.reanalyze(project.id, apply ? { provider, model, applyToTeam: true, note } : { note })
+      toast(apply ? `Reanálise iniciada — ${r.agentsUpdated} agente(s) agora usam ${provider}/${model || prov?.defaultModel}` : 'Reanálise iniciada', 'success')
+      await reload()
+      onClose()
+      onDone()
+    } catch (err) {
+      toast((err as Error).message, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Modal open onClose={onClose} title="Reanalisar projeto" accent="cyan" width={560}
+      footer={<><button className="px-btn ghost" onClick={onClose}>Cancelar</button><button className="px-btn solid" disabled={busy} onClick={() => void submit()} data-testid="reanalyze-submit"><RefreshCcw size={13} /> {busy ? 'Enviando…' : 'Reanalisar'}</button></>}>
+      <div className="space-y-3 text-[12px]">
+        <p className="text-lab-muted">O coordenador refaz o plano a partir da solicitação original. Tarefas não concluídas e aprovações pendentes são descartadas; documentos e custos já registrados permanecem.</p>
+        {project.error && <p className="rounded-[5px] border border-neon-pink/40 bg-neon-pink/10 p-2 text-[11px] text-neon-pink">Último erro: {project.error.slice(0, 260)}</p>}
+        <label className="flex items-center gap-2 font-bold"><input type="checkbox" className="accent-[#00f5a0]" checked={apply} onChange={(e) => setApply(e.target.checked)} data-testid="reanalyze-apply" /> Trocar o modelo de IA de toda a equipe ({team.length} agentes)</label>
+        {apply && (
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Field label="Provedor">
+              <select className="px-input" value={provider} onChange={(e) => { setProvider(e.target.value as typeof provider); setModel('') }} data-testid="reanalyze-provider">
+                {enabled.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Modelo" hint="Vazio = modelo padrão do provedor (Provedores e Custos)">
+              <input className="px-input" list="reanalyze-models" value={model} onChange={(e) => setModel(e.target.value)} placeholder={prov ? `padrão: ${prov.defaultModel}` : ''} data-testid="reanalyze-model" />
+              <datalist id="reanalyze-models">{prov?.models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</datalist>
+            </Field>
+          </div>
+        )}
+        <Field label="Orientação para o coordenador (opcional)"><textarea className="px-input h-16" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ex.: reduza para 4 tarefas e foque em manutenção preditiva" /></Field>
+      </div>
+    </Modal>
   )
 }

@@ -1,12 +1,13 @@
 import type {
   AgentMessage, Artifact, ArtifactContent, Evidence, Execution, Organization, OrgTemplate, Overview, Project, ProjectTask, Usage,
 } from '@/types/platform'
-import { apiBase } from './backend'
+import type { Provider } from '@/types/domain'
 import { errorText } from './api/apiDataSource'
+import { apiFetch } from './http'
 
-/** Cliente da API da plataforma (somente com backend conectado). */
+/** Cliente da API da plataforma (somente com backend conectado; envia o token do usuário). */
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${apiBase()}/api/v1${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) } })
+  const res = await apiFetch(`/api/v1${path}`, init)
   if (!res.ok) throw new Error(await errorText(res))
   return res.status === 204 ? (undefined as T) : ((await res.json()) as T)
 }
@@ -36,7 +37,22 @@ export const platform = {
   artifacts: (id: string) => http<Artifact[]>(`/projects/${id}/artifacts`),
   artifact: (id: string, artifactId: string, version?: number) => http<ArtifactContent>(`/projects/${id}/artifacts/${artifactId}${version ? `?version=${version}` : ''}`),
   diff: (id: string, artifactId: string, a: number, b: number) => http<{ diff: string }>(`/projects/${id}/artifacts/${artifactId}/diff?a=${a}&b=${b}`),
-  downloadUrl: (id: string, artifactId: string, version?: number) => `${apiBase()}/api/v1/projects/${id}/artifacts/${artifactId}/download${version ? `?version=${version}` : ''}`,
+  /** Download autenticado (o link direto não levaria o token). */
+  download: async (id: string, artifactId: string, version?: number) => {
+    const res = await apiFetch(`/api/v1/projects/${id}/artifacts/${artifactId}/download${version ? `?version=${version}` : ''}`)
+    if (!res.ok) throw new Error(await errorText(res))
+    const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? 'documento.md'
+    const url = URL.createObjectURL(await res.blob())
+    const a = Object.assign(document.createElement('a'), { href: url, download: name })
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 2000)
+  },
+  reanalyze: (id: string, b: { provider?: string; model?: string; applyToTeam?: boolean; note?: string }) => post<Project & { agentsUpdated: number }>(`/projects/${id}/reanalyze`, b),
+  retry: (id: string) => post<Project>(`/projects/${id}/retry`),
+  saveProviders: (body: Record<string, { enabled?: boolean; defaultModel?: string; customModels?: string[] }>) => http<Provider[]>('/providers', { method: 'PUT', body: JSON.stringify(body) }),
+  refreshModels: (providerId: string) => post<Provider>(`/providers/${providerId}/models/refresh`),
   evidence: (id: string) => http<Evidence[]>(`/projects/${id}/evidence`),
   executions: (id: string) => http<Execution[]>(`/projects/${id}/executions`),
 
