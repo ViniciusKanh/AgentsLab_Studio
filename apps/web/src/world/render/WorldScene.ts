@@ -105,6 +105,7 @@ export class WorldScene extends Phaser.Scene {
       worldBus.on('camera:focus', ({ agentId }) => this.focus(agentId)),
       worldBus.on('camera:fit', () => this.fit()),
       worldBus.on('camera:zoom', ({ factor }) => this.zoomBy(factor)),
+      worldBus.on('agent:message', (m) => this.showMessage(m)),
     )
 
     // câmera
@@ -314,6 +315,14 @@ export class WorldScene extends Phaser.Scene {
       if (!r) continue
       this.world.setOperational(a.id, { state: r.state, taskTitle: r.taskTitle, partnerId: r.partnerId, progress: r.progress, origin: appConfig.mode === 'real' ? 'real' : 'demo' })
     }
+  }
+
+  /** Balões e caminhadas a partir de mensagens reais (texto resumido; íntegra no projeto). */
+  private showMessage(m: { fromAgentId: string | null; toAgentId: string | null; type: string; content: string }) {
+    if (!m.fromAgentId) return
+    const text = m.content.replace(/\s+/g, ' ').slice(0, 90) + (m.content.length > 90 ? '…' : '')
+    if (m.type === 'entrega' && m.toAgentId) this.world.deliver(m.fromAgentId, m.toAgentId, text)
+    else this.world.say(m.fromAgentId, text)
   }
 
   private applySelection() {

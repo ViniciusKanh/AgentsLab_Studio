@@ -1,30 +1,20 @@
 /**
- * Diálogos AMBIENTAIS pré-definidos (locais, sem LLM).
- * Mensagens profissionais reais virão de eventos do backend (Fase 4/5).
+ * Falas AMBIENTAIS (camada 1, locais, sem LLM): apenas convivência social neutra.
+ * Nenhuma fala ambiental afirma progresso de trabalho — falas profissionais são
+ * exclusivamente as mensagens reais registradas pelo backend (eventos agent.message).
  */
 export const LINES = {
-  greet: ['Bom dia!', 'E aí, tudo certo?', 'Oi! Como vai o projeto?', 'Olá, equipe!', 'Bom te ver por aqui!'],
-  reply: ['Tudo ótimo!', 'Correria, mas indo bem.', 'Melhor agora!', 'Bora!', 'Firme e forte.'],
-  coffee: ['Vamos tomar um café?', 'Hora do café!', 'Esse café está ótimo.', 'Mais um espresso, por favor.'],
-  work: ['Pode me ajudar com isso?', 'Preciso revisar um resultado.', 'Achei algo interessante nos dados.', 'Vamos parear nessa parte?', 'Tenho uma ideia para o pipeline.'],
-  workReply: ['Claro, me mostra.', 'Vou dar uma olhada.', 'Boa! Anota no quadro.', 'Faz sentido, vamos testar.', 'Depois do café eu vejo.'],
-  research: ['O experimento funcionou!', 'Esse artigo é muito bom.', 'Os embeddings melhoraram.', 'Precisamos de mais amostras.', 'Vamos comparar com o baseline?'],
-  observe: ['Que vista linda.', 'Interessante…', 'Hmm, deixa eu ver.', 'Os indicadores estão estáveis.'],
-  done: ['Concluí minha análise!', 'Entrega pronta!', 'Missão cumprida!', 'Fluxo pronto para execução!'],
-  bye: ['Até já!', 'Valeu!', 'Falamos depois.', 'Bom trabalho!'],
-  robot: ['Bip-bop. Recarga em 87%.', 'Entregando suprimentos.', 'Rotina verificada.', 'Sistemas nominais.'],
-  fun: ['Alguém viu o gato?', 'Pausa rápida!', 'Hoje o código compilou de primeira!', 'Quem quer jogar xadrez depois?'],
+  greet: ['Bom dia!', 'E aí, tudo certo?', 'Olá!', 'Bom te ver por aqui!'],
+  reply: ['Tudo ótimo!', 'Indo bem.', 'Bora!', 'Firme e forte.'],
+  coffee: ['Vamos tomar um café?', 'Hora do café!', 'Mais um espresso, por favor.'],
+  work: ['Como foi o fim de semana?', 'Viu a chuva ontem?', 'Que dia corrido!', 'Bora almoçar mais tarde?'],
+  workReply: ['Foi tranquilo.', 'Vi sim!', 'Pois é.', 'Combinado.'],
+  research: ['Que calor hoje.', 'Alguém viu meu caderno?', 'Gostei da sala nova.'],
+  observe: ['Que vista linda.', 'Hmm…', 'Deixa eu ver.'],
+  bye: ['Até já!', 'Valeu!', 'Falamos depois.'],
+  robot: ['Bip-bop.', 'Rotina de limpeza.', 'Sistemas nominais.'],
+  fun: ['Alguém viu o gato?', 'Pausa rápida!', 'Quem quer café?'],
 }
-
-/** Mensagens operacionais DEMONSTRATIVAS (marcadas como demo na interface). */
-export const DEMO_PRO_LINES = [
-  'Encontrei três estudos relevantes.',
-  'Vou comparar os resultados.',
-  'Identifiquei uma inconsistência.',
-  'Os dados de vendas estão consolidados.',
-  'Posso revisar o relatório agora.',
-  'O modelo convergiu na última rodada.',
-]
 
 export function pick<T>(arr: readonly T[], rnd: () => number = Math.random): T {
   return arr[Math.floor(rnd() * arr.length)]

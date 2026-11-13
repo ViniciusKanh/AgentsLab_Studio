@@ -2,7 +2,7 @@ import type { AgentRuntimeState } from '@/types/domain'
 import type { AmbientActivity, AnimKey, EmoteKey, Facing, InteractionPoint, Personality, PointType, Tile, WorldMapData } from '../types'
 import { isWalkable, pointPx, pxToTile, tileToPx, walkableTiles, zoneAt } from '../maps'
 import { findPath } from '../nav/astar'
-import { LINES, DEMO_PRO_LINES, pick } from './dialogues'
+import { LINES, pick } from './dialogues'
 import { DEFAULT_PERSONALITY } from './personality'
 
 /**
@@ -55,6 +55,8 @@ export interface Actor {
   partnerId: string | null
   chatTurns: number
   emote: { key: EmoteKey; until: number } | null
+  /** entrega real em andamento (mensagem do backend) */
+  delivery: { toId: string; text: string } | null
   op: OperationalInput
   nextDecision: number
 }
@@ -111,7 +113,7 @@ export class AmbientWorld {
         id: inp.id, name: inp.name, role: inp.role, characterId: inp.characterId, robot: inp.robot,
         personality: inp.personality ?? DEFAULT_PERSONALITY, homePointId: home?.id ?? null,
         x: pos.x, y: pos.y, facing: 'down', path: [], activity: 'idle', anim: 'idle', seated: false, pointId: null,
-        intent: null, until: 0, lastActivity: null, partnerId: null, chatTurns: 0, emote: null,
+        intent: null, until: 0, lastActivity: null, partnerId: null, chatTurns: 0, emote: null, delivery: null,
         op: { state: 'idle', taskTitle: null, partnerId: null, progress: 0, origin: 'demo' },
         nextDecision: this.time + 300 + this.rnd() * 2500,
       })
@@ -142,7 +144,6 @@ export class AmbientWorld {
     } else if (op.state === 'completed') {
       a.emote = { key: 'check', until: this.time + 2500 }
       if (a.op.taskTitle || op.taskTitle) this.events.feed?.(`${a.name} concluiu: ${op.taskTitle ?? a.op.taskTitle}`, kind, a.id)
-      this.speak(a, pick(LINES.done, this.rnd), kind)
       this.release(a)
       this.setActivity(a, 'celebrate', 2400)
     } else if (op.state === 'failed') {
@@ -218,6 +219,15 @@ export class AmbientWorld {
     if (intent.activity === 'observe') {
       a.emote = { key: this.rnd() < 0.5 ? 'idea' : 'question', until: this.time + 2200 }
       if (this.rnd() < 0.3) this.speak(a, pick(a.robot ? LINES.robot : LINES.observe, this.rnd), 'ambiente')
+    }
+    if (a.delivery) {
+      const to = this.actors.get(a.delivery.toId)
+      if (to) {
+        a.facing = to.x < a.x ? 'left' : 'right'
+        to.emote = { key: 'check', until: this.time + 2500 }
+      }
+      this.speak(a, a.delivery.text, 'operacional-real')
+      a.delivery = null
     }
     if (intent.activity === 'rest' && this.rnd() < 0.4) a.emote = { key: 'zzz', until: this.time + 4000 }
   }
@@ -360,7 +370,8 @@ export class AmbientWorld {
       const speaker = a.chatTurns % 2 === 0 ? a : b
       const listener = speaker === a ? b : a
       if (professional) {
-        this.speak(speaker, pick(DEMO_PRO_LINES, this.rnd), a.op.origin === 'real' ? 'operacional-real' : 'operacional-demo')
+        // conteúdo profissional só aparece quando o backend registra uma mensagem real (say/deliver)
+        speaker.emote = { key: 'idea', until: this.time + 1500 }
       } else {
         const first = a.chatTurns >= 3
         const pool = first ? LINES.greet : speaker.personality.curiosity > 70 ? LINES.research : speaker === a ? LINES.work : LINES.workReply
@@ -455,6 +466,52 @@ export class AmbientWorld {
     const t = this.walkCache[Math.floor(this.rnd() * this.walkCache.length)]
     if (!otherZone) return t
     return zoneAt(this.map, t) ? t : this.walkCache[Math.floor(this.rnd() * this.walkCache.length)]
+  }
+
+  /** Mensagem REAL do backend exibida no balão do agente. */
+  say(id: string, text: string) {
+    const a = this.actors.get(id)
+    if (a) this.speak(a, text, 'operacional-real')
+  }
+
+  /**
+   * Transferência REAL de trabalho: o remetente caminha até o destinatário e entrega.
+   * Só é chamada a partir de eventos agent.message do tipo "entrega" registrados no backend.
+   */
+  deliver(fromId: string, toId: string, text: string) {
+    const a = this.actors.get(fromId), b = this.actors.get(toId)
+    if (!a) return
+    if (!b) return void this.speak(a, text, 'operacional-real')
+    this.endSocial(a)
+    this.release(a)
+    const waits = !BUSY_STATES.includes(b.op.state) && b.activity !== 'paused'
+    if (waits) {
+      // destinatário aguarda a entrega em vez de sair andando
+      this.endSocial(b)
+      b.intent = null
+      b.path = []
+    }
+    a.delivery = { toId, text }
+    const near = this.reachableNear(a, pxToTile(this.map, b.x, b.y))
+    if (near) this.walkTo(a, near, { activity: 'idle', pointId: null, duration: 2600 })
+    if (waits) this.setActivity(b, 'idle', (a.path.length * 16 * 1000) / SPEED + 4000)
+    if (!a.intent) { this.speak(a, text, 'operacional-real'); a.delivery = null }
+    this.events.feed?.(`${a.name} entregou trabalho para ${b.name}`, 'operacional-real', a.id)
+  }
+
+  /** Primeiro ladrilho ao redor do alvo que o ator consegue alcançar (evita bolsões isolados). */
+  private reachableNear(a: Actor, t: Tile): Tile | null {
+    const from = pxToTile(this.map, a.x, a.y)
+    const start = isWalkable(this.map, from.x, from.y) ? from : this.nearestWalkable(from)
+    const walk = (x: number, y: number) => isWalkable(this.map, x, y)
+    for (let r = 1; r < 6; r++) {
+      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue
+        const c = { x: t.x + dx, y: t.y + dy }
+        if (walk(c.x, c.y) && findPath(start, c, this.map.width, this.map.height, walk) !== null) return c
+      }
+    }
+    return null
   }
 
   private speak(a: Actor, text: string, kind: 'ambiente' | 'operacional-demo' | 'operacional-real') {

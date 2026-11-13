@@ -1,46 +1,39 @@
 import { create } from 'zustand'
 import type { Agent, ChatMessage } from '@/types/domain'
 import { appConfig } from '@/services/config'
-import { useSimulationStore } from './simulationStore'
-import { STATE_META } from '@/simulation/states'
+import { platform } from '@/services/platform'
 
 /**
- * Conversa com um agente. No modo demo as respostas são MODELOS LOCAIS
- * (sem LLM) e vêm marcadas como demonstrativas. No modo real: POST /agents/{id}/chat (Fase 3).
+ * Conversa com um agente: chamada REAL ao modelo configurado (POST /agents/{id}/chat).
+ * Sem backend conectado nenhuma resposta é gerada — o app avisa em vez de simular.
  */
 interface ChatState {
   byAgent: Record<string, ChatMessage[]>
-  send: (agent: Agent, text: string) => void
+  pending: Record<string, boolean>
+  send: (agent: Agent, text: string) => Promise<void>
 }
 
 const id = () => `msg-${Math.random().toString(36).slice(2, 9)}`
 
-function demoReply(agent: Agent, text: string): string {
-  const rt = useSimulationStore.getState().runtime[agent.id]
-  const st = STATE_META[rt?.state ?? 'idle'].label.toLowerCase()
-  const t = text.toLowerCase()
-  if (/status|fazendo|tarefa|andamento/.test(t)) {
-    return rt?.taskTitle ? `Estou ${st} em “${rt.taskTitle}” (${Math.round((rt.progress ?? 0) * 100)}%).` : `No momento estou ${st}, sem tarefa atribuída.`
-  }
-  if (/resultado|entrega|relat/.test(t)) return 'Ainda não tenho resultados reais: no modo demonstrativo eu não executo modelos de IA.'
-  if (/quem|papel|faz\b|função/.test(t)) return `Sou ${agent.name}, ${agent.role} (${agent.department}). Objetivo: ${agent.objective}`
-  return `Entendido! Quando o backend estiver conectado vou responder usando ${agent.intelligence.model}. Por enquanto esta é uma resposta de demonstração.`
-}
-
 export const useChatStore = create<ChatState>((set, get) => ({
   byAgent: {},
-  send(agent, text) {
-    const now = new Date().toISOString()
-    const msgs = [...(get().byAgent[agent.id] ?? []), { id: id(), agentId: agent.id, role: 'user', text, ts: now, origin: appConfig.mode } as ChatMessage]
-    set({ byAgent: { ...get().byAgent, [agent.id]: msgs } })
-    if (appConfig.mode === 'real') {
-      const sys: ChatMessage = { id: id(), agentId: agent.id, role: 'system', text: 'Chat real ainda não disponível no backend (Fase 3).', ts: now, origin: 'real' }
-      set({ byAgent: { ...get().byAgent, [agent.id]: [...msgs, sys] } })
+  pending: {},
+  async send(agent, text) {
+    const push = (m: ChatMessage) => set({ byAgent: { ...get().byAgent, [agent.id]: [...(get().byAgent[agent.id] ?? []), m] } })
+    const history = (get().byAgent[agent.id] ?? []).filter((m) => m.role !== 'system').map((m) => ({ role: m.role === 'user' ? 'user' as const : 'assistant' as const, content: m.text }))
+    push({ id: id(), agentId: agent.id, role: 'user', text, ts: new Date().toISOString(), origin: appConfig.mode })
+    if (appConfig.mode !== 'real') {
+      push({ id: id(), agentId: agent.id, role: 'system', text: 'Backend desconectado: inicie o servidor local para conversar com o agente.', ts: new Date().toISOString(), origin: 'demo' })
       return
     }
-    setTimeout(() => {
-      const reply: ChatMessage = { id: id(), agentId: agent.id, role: 'agent', text: demoReply(agent, text), ts: new Date().toISOString(), origin: 'demo' }
-      set({ byAgent: { ...get().byAgent, [agent.id]: [...(get().byAgent[agent.id] ?? []), reply] } })
-    }, 650)
+    set({ pending: { ...get().pending, [agent.id]: true } })
+    try {
+      const r = await platform.chat(agent.id, text, history)
+      push({ id: id(), agentId: agent.id, role: 'agent', text: r.reply, ts: new Date().toISOString(), origin: 'real' })
+    } catch (err) {
+      push({ id: id(), agentId: agent.id, role: 'system', text: (err as Error).message, ts: new Date().toISOString(), origin: 'real' })
+    } finally {
+      set({ pending: { ...get().pending, [agent.id]: false } })
+    }
   },
 }))

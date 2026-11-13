@@ -102,10 +102,13 @@ export interface Agent {
   rules: AgentRules
   tags: string[]
   status: AgentStatus
-  level: number
-  xp: number
   version: string
-  stats: AgentStats
+  /** Indicadores reais calculados das execuções (ausentes até haver uso). */
+  stats?: AgentStats
+  /** Organização à qual o agente pertence (modo conectado). */
+  organizationId?: string | null
+  /** Coordenador interpreta solicitações e distribui o trabalho. */
+  isCoordinator?: boolean
   /** Personalidade: influencia o comportamento ambiental (e futuramente as instruções). */
   personality?: AgentPersonality
   createdAt: string
@@ -124,8 +127,8 @@ export interface AgentPersonality {
 }
 
 /**
- * Perfil de credencial. O SEGREDO nunca fica no frontend: no modo real a chave é
- * enviada uma única vez ao backend, que a armazena criptografada e devolve só metadados.
+ * Perfil de credencial. O SEGREDO nunca fica no frontend: a chave é enviada uma única vez
+ * ao backend local, que a guarda no cofre do sistema operacional e devolve só metadados.
  */
 export interface CredentialProfile {
   id: string
@@ -133,6 +136,8 @@ export interface CredentialProfile {
   alias: string
   last4: string | null
   status: 'demo' | 'stored' | 'valid' | 'invalid'
+  /** perfil padrão do provedor (usado por agentes sem perfil próprio) */
+  isDefault?: boolean
   createdAt: string
   origin: DataOrigin
 }
@@ -159,7 +164,7 @@ export interface ChatMessage {
   origin: DataOrigin
 }
 
-export type AgentDraft = Omit<Agent, 'id' | 'createdAt' | 'updatedAt' | 'stats' | 'level' | 'xp' | 'version' | 'origin'> & {
+export type AgentDraft = Omit<Agent, 'id' | 'createdAt' | 'updatedAt' | 'stats' | 'version' | 'origin'> & {
   id?: string
 }
 
@@ -346,6 +351,10 @@ export interface AgentRuntime {
   partnerId: string | null
   since: string
   tokensSession: number
+  /** etapa real informada pelo backend (sem porcentagens arbitrárias) */
+  step?: string
+  stepsDone?: number
+  stepsTotal?: number
 }
 
 // ---------------------------------------------------------------------------

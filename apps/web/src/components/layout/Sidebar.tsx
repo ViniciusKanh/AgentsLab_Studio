@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import { ChevronsLeft, ChevronsRight } from 'lucide-react'
-import { NAV_MAIN, NAV_MORE, type NavItem } from './navigation'
+import { NAV_MAIN, type NavItem } from './navigation'
 import { cx } from '../ui/primitives'
 import { useWorldStore } from '@/stores/worldStore'
 
@@ -34,9 +34,6 @@ export function Sidebar() {
     <nav aria-label="Navegação principal" data-testid="sidebar" className={cx('flex shrink-0 flex-col border-r border-lab-line/60 bg-[#0a1023] transition-[width] duration-200', collapsed ? 'w-[58px]' : 'w-[196px]')}>
       <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
         {NAV_MAIN.map((n) => <Item key={n.to} item={n} collapsed={collapsed} />)}
-        <div className="my-3 border-t border-lab-line/60" />
-        {!collapsed && <p className="px-2.5 pb-1 text-[10px] font-extrabold uppercase tracking-[0.15em] text-lab-muted">Apoio</p>}
-        {NAV_MORE.map((n) => <Item key={n.to} item={n} collapsed={collapsed} />)}
       </div>
       <button onClick={() => setCollapsed(!collapsed)} className="m-2 flex items-center justify-center gap-2 rounded-[6px] py-2 text-[11px] font-bold text-lab-muted hover:bg-white/5 hover:text-white" aria-label={collapsed ? 'Expandir menu' : 'Recolher menu'} data-testid="sidebar-toggle">
         {collapsed ? <ChevronsRight size={16} /> : <><ChevronsLeft size={16} /> Recolher</>}

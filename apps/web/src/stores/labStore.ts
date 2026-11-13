@@ -1,12 +1,14 @@
 import { create } from 'zustand'
 import type { Agent, AgentDraft, CredentialProfile, Provider, Workflow } from '@/types/domain'
 import { dataSource } from '@/services'
-import { useGameStore } from './gameStore'
+import { appConfig } from '@/services/config'
+import { platform } from '@/services/platform'
+import type { Organization } from '@/types/platform'
 import { useUiStore } from './uiStore'
 
 /**
  * Estado compartilhado de entidades (agentes, workflows, provedores).
- * A persistência é delegada ao `dataSource` (demo: localStorage | real: FastAPI).
+ * A persistência é delegada ao `dataSource` (backend conectado: FastAPI | offline: exemplos locais).
  */
 interface LabState {
   loaded: boolean
@@ -14,6 +16,9 @@ interface LabState {
   workflows: Workflow[]
   providers: Provider[]
   credentials: CredentialProfile[]
+  /** organizações reais (somente com backend conectado) */
+  organizations: Organization[]
+  loadOrganizations: () => Promise<void>
   createCredential: (input: { provider: CredentialProfile['provider']; alias: string; apiKey?: string }) => Promise<CredentialProfile | null>
   deleteCredential: (id: string) => Promise<void>
   load: () => Promise<void>
@@ -33,10 +38,16 @@ export const useLabStore = create<LabState>((set, get) => ({
   workflows: [],
   providers: [],
   credentials: [],
+  organizations: [],
+  async loadOrganizations() {
+    if (appConfig.mode !== 'real') return set({ organizations: [] })
+    set({ organizations: await platform.organizations().catch(() => [] as Organization[]) })
+  },
   async load() {
     const [agents, workflows, providers] = await Promise.all([dataSource.listAgents(), dataSource.listWorkflows(), dataSource.listProviders()])
     const credentials = await dataSource.listCredentials().catch(() => [] as CredentialProfile[])
     set({ agents, workflows, providers, credentials, loaded: true })
+    await get().loadOrganizations()
   },
   async createCredential(input) {
     try {
@@ -57,7 +68,6 @@ export const useLabStore = create<LabState>((set, get) => ({
     const isNew = !draft.id
     const saved = await dataSource.saveAgent(draft)
     set({ agents: isNew ? [...get().agents, saved] : get().agents.map((a) => (a.id === saved.id ? saved : a)) })
-    if (isNew) useGameStore.getState().record('agentCreated', { rag: saved.knowledge.ragEnabled })
     useUiStore.getState().toast(isNew ? `Agente “${saved.name}” criado` : `Agente “${saved.name}” atualizado`, 'success')
     return saved
   },
@@ -75,8 +85,8 @@ export const useLabStore = create<LabState>((set, get) => ({
   async setAgentStatus(id, status) {
     const a = get().agents.find((x) => x.id === id)
     if (!a) return
-    const { createdAt: _c, updatedAt: _u, stats: _s, level: _l, xp: _x, version: _v, origin: _o, ...draft } = a
-    void _c; void _u; void _s; void _l; void _x; void _v; void _o
+    const { createdAt: _c, updatedAt: _u, stats: _s, version: _v, origin: _o, ...draft } = a
+    void _c; void _u; void _s; void _v; void _o
     const saved = await dataSource.saveAgent({ ...draft, status })
     set({ agents: get().agents.map((x) => (x.id === id ? saved : x)) })
   },
@@ -84,7 +94,6 @@ export const useLabStore = create<LabState>((set, get) => ({
     const saved = await dataSource.saveWorkflow(wf)
     const exists = get().workflows.some((w) => w.id === wf.id)
     set({ workflows: exists ? get().workflows.map((w) => (w.id === saved.id ? saved : w)) : [...get().workflows, saved] })
-    useGameStore.getState().record('workflowSaved')
     useUiStore.getState().toast(`Workflow “${saved.name}” salvo localmente`, 'success')
     return saved
   },

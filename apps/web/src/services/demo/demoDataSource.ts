@@ -1,6 +1,6 @@
 import type { LabDataSource } from '../dataSource'
 import type { Agent, AgentDraft, CredentialProfile, Provider, Workflow } from '@/types/domain'
-import { DEMO_CREDENTIALS, DEMO_AGENTS, DEMO_PROVIDERS, DEMO_WORKFLOWS, ENVIRONMENTS, KNOWLEDGE_BASES, demoDashboard, demoLogs, demoRuns } from './demoData'
+import { DEMO_CREDENTIALS, DEMO_AGENTS, DEMO_PROVIDERS, DEMO_WORKFLOWS, ENVIRONMENTS, KNOWLEDGE_BASES, demoLogs, demoRuns } from './demoData'
 
 /**
  * Implementação DEMONSTRATIVA: persiste no localStorage do navegador.
@@ -73,10 +73,6 @@ const delay = <T,>(v: T, ms = 60) => new Promise<T>((res) => setTimeout(() => re
 export function createDemoDataSource(): LabDataSource {
   return {
     kind: 'demo',
-    async getDashboard(period) {
-      const db = load()
-      return delay(demoDashboard(period, db.agents.filter((a) => a.status === 'active').length, db.workflows.length))
-    },
     async listAgents() {
       return delay(clone(load().agents))
     },
@@ -87,7 +83,7 @@ export function createDemoDataSource(): LabDataSource {
       const agent: Agent = existing
         ? { ...existing, ...draft, id: existing.id, updatedAt: now, version: bumpVersion(existing.version) }
         : {
-            ...draft, id: uid('ag'), createdAt: now, updatedAt: now, level: 1, xp: 0, version: '0.1.0', origin: 'demo',
+            ...draft, id: uid('ag'), createdAt: now, updatedAt: now, version: '0.1.0', origin: 'demo',
             stats: { runs: 0, successRate: 0, tokens30d: 0, costUsd30d: 0, avgLatencySec: 0 },
           }
       const agents = existing ? db.agents.map((a) => (a.id === agent.id ? agent : a)) : [...db.agents, agent]
@@ -99,7 +95,7 @@ export function createDemoDataSource(): LabDataSource {
       const src = db.agents.find((a) => a.id === id)
       if (!src) throw new Error('Agente não encontrado')
       const now = new Date().toISOString()
-      const copy: Agent = { ...clone(src), id: uid('ag'), name: `${src.name} (cópia)`, stationId: null, createdAt: now, updatedAt: now, version: '0.1.0', level: 1, xp: 0, stats: { runs: 0, successRate: 0, tokens30d: 0, costUsd30d: 0, avgLatencySec: 0 } }
+      const copy: Agent = { ...clone(src), id: uid('ag'), name: `${src.name} (cópia)`, stationId: null, createdAt: now, updatedAt: now, version: '0.1.0', stats: { runs: 0, successRate: 0, tokens30d: 0, costUsd30d: 0, avgLatencySec: 0 } }
       persist({ ...db, agents: [...db.agents, copy] })
       return delay(clone(copy))
     },
@@ -150,7 +146,7 @@ export function createDemoDataSource(): LabDataSource {
     async createCredential(input) {
       if (input.apiKey) {
         // segurança: no modo demo a chave NUNCA é armazenada no navegador
-        throw new Error('Modo demonstrativo: chaves reais só podem ser salvas pelo backend (VITE_APP_MODE=real).')
+        throw new Error('Backend desconectado: chaves reais só podem ser salvas com o servidor local ativo.')
       }
       const db = load()
       const cred: CredentialProfile = { id: uid('cred'), provider: input.provider, alias: input.alias.trim(), last4: null, status: 'demo', createdAt: new Date().toISOString(), origin: 'demo' }

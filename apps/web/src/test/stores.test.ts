@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useSimulationStore } from '@/stores/simulationStore'
-import { levelFromXp, useGameStore, xpForLevel } from '@/stores/gameStore'
+import { dispatchPlatformEvent } from '@/services/realtime'
+import { worldBus } from '@/world/events/bus'
 import { createDemoDataSource, __resetDemoMemory } from '@/services/demo/demoDataSource'
 import { emptyDraft } from '@/features/agents/agentForm'
 
@@ -21,27 +22,22 @@ describe('simulationStore', () => {
   })
 })
 
-describe('gameStore', () => {
-  beforeEach(() => useGameStore.getState().reset())
-  it('concede XP apenas por ações verificáveis e libera missão', () => {
-    const g = useGameStore.getState()
-    g.record('agentCreated', { rag: true })
-    expect(useGameStore.getState().xp).toBeGreaterThan(0)
-    expect(useGameStore.getState().claimMission('m-first-agent')).toBe(true)
-    expect(useGameStore.getState().claimMission('m-first-agent')).toBe(false)
-    expect(useGameStore.getState().claimMission('m-workflow')).toBe(false)
-  })
-  it('não duplica XP por ambiente revisitado', () => {
-    const g = useGameStore.getState()
-    g.record('environmentVisited', { envId: 'office' })
-    const xp = useGameStore.getState().xp
-    g.record('environmentVisited', { envId: 'office' })
-    expect(useGameStore.getState().xp).toBe(xp)
-  })
-  it('curva de níveis é monotônica', () => {
-    expect(levelFromXp(0)).toBe(1)
-    expect(levelFromXp(xpForLevel(5))).toBe(5)
-    expect(xpForLevel(6)).toBeGreaterThan(xpForLevel(5))
+describe('realtime (eventos do backend)', () => {
+  beforeEach(() => useSimulationStore.getState().reset())
+  it('converte eventos SSE em estado dos agentes, etapas reais e balões', () => {
+    const said: string[] = []
+    const off = worldBus.on('agent:message', (m) => said.push(`${m.type}:${m.fromAgentId}->${m.toAgentId}`))
+    const ts = new Date().toISOString()
+    dispatchPlatformEvent({ id: 1, type: 'agent.state', projectId: 'p', ts, payload: { agentId: 'a1', state: 'working', taskId: 't1', taskTitle: 'Pesquisar' } })
+    dispatchPlatformEvent({ id: 2, type: 'task.progress', projectId: 'p', ts, payload: { agentId: 'a1', taskId: 't1', progress: 0.5, step: 'buscando fontes', stepsDone: 2, stepsTotal: 4, tokens: 30 } })
+    dispatchPlatformEvent({ id: 3, type: 'agent.message', projectId: 'p', ts, payload: { fromAgentId: 'a1', toAgentId: 'a2', type: 'entrega', content: 'Achados prontos', fromKind: 'agent' } })
+    off()
+    const rt = useSimulationStore.getState().runtime.a1
+    expect(rt.state).toBe('working')
+    expect(rt.step).toBe('buscando fontes')
+    expect([rt.stepsDone, rt.stepsTotal]).toEqual([2, 4])
+    expect(said).toEqual(['entrega:a1->a2'])
+    expect(useSimulationStore.getState().logs.at(-1)?.origin).toBe('real')
   })
 })
 
@@ -57,11 +53,6 @@ describe('demoDataSource', () => {
     await ds.deleteAgent(c.id)
     __resetDemoMemory()
     expect((await ds.listAgents()).some((x) => x.id === a.id)).toBe(true)
-  })
-  it('dashboard demo é marcado como demonstrativo', async () => {
-    const d = await createDemoDataSource().getDashboard('7d')
-    expect(d.origin).toBe('demo')
-    expect(d.kpis).toHaveLength(6)
   })
 })
 

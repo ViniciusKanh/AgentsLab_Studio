@@ -1,20 +1,28 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Briefcase, Crosshair } from 'lucide-react'
 import { useLabStore } from '@/stores/labStore'
 import { useSimulationStore } from '@/stores/simulationStore'
-import { useMissionStore } from '@/stores/missionStore'
+import { platform, PROJECT_STATUS } from '@/services/platform'
+import { appConfig } from '@/services/config'
+import { onPlatformEvent } from '@/services/realtime'
+import type { Project } from '@/types/platform'
 import { STATE_META } from '@/simulation/states'
 import { worldBus } from '@/world/events/bus'
-import { Avatar, Chip, DemoTag } from '@/components/ui/primitives'
+import { Avatar, Chip } from '@/components/ui/primitives'
 
-/** Modo gerenciamento: lista de agentes da sala e missões, sem sair do ambiente. */
-export function ManagementPanel({ envId, onMission }: { envId: string; onMission: (ids: string[]) => void }) {
+/** Modo gerenciamento: agentes da sala e projetos reais, sem sair do ambiente. */
+export function ManagementPanel({ envId, onAssign }: { envId: string; onAssign: (id: string) => void }) {
   const agents = useLabStore((s) => s.agents)
   const runtime = useSimulationStore((s) => s.runtime)
   const select = useSimulationStore((s) => s.select)
-  const running = useSimulationStore((s) => s.running)
-  const setRunning = useSimulationStore((s) => s.setRunning)
-  const missions = useMissionStore((s) => s.missions)
+  const [projects, setProjects] = useState<Project[]>([])
+  useEffect(() => {
+    if (appConfig.mode !== 'real') return
+    const load = () => platform.projects().then(setProjects).catch(() => undefined)
+    void load()
+    return onPlatformEvent((e) => { if (e.type === 'project.updated') void load() })
+  }, [])
   const here = useMemo(() => agents.filter((a) => a.environmentId === envId && a.status !== 'archived'), [agents, envId])
   return (
     <div className="absolute bottom-3 left-3 top-14 flex w-[270px] flex-col gap-2" data-testid="management-panel">
@@ -30,22 +38,21 @@ export function ManagementPanel({ envId, onMission }: { envId: string; onMission
                   <span className="min-w-0"><b className="block truncate text-[11.5px]">{a.name}</b><span className="text-[10px]" style={{ color: m.color }}>{a.status === 'paused' ? 'Pausado' : m.label}</span></span>
                 </button>
                 <button className="text-lab-muted hover:text-neon-cyan" onClick={() => { select(a.id); worldBus.emit('camera:focus', { agentId: a.id }) }} aria-label={`Centralizar ${a.name}`}><Crosshair size={14} /></button>
-                <button className="text-lab-muted hover:text-neon-green" onClick={() => onMission([a.id])} aria-label={`Missão para ${a.name}`}><Briefcase size={14} /></button>
+                <button className="text-lab-muted hover:text-neon-green disabled:opacity-30" onClick={() => onAssign(a.id)} disabled={appConfig.mode !== 'real'} aria-label={`Atribuir tarefa a ${a.name}`} title="Atribuir tarefa"><Briefcase size={14} /></button>
               </li>
             )
           })}
         </ul>
       </section>
       <section className="max-h-[42%] overflow-y-auto rounded-[8px] border border-lab-line/70 bg-[#070b17]/92 p-3 text-[11.5px]">
-        <p className="mb-1.5 flex items-center gap-2 font-extrabold">Missões <DemoTag /></p>
-        {missions.length === 0 && <p className="text-lab-muted">Nenhuma missão ainda. Use “Nova missão”.</p>}
-        {missions.slice(0, 6).map((m) => (
-          <p key={m.id} className="flex items-center justify-between gap-2 border-b border-white/5 py-1"><span className="truncate">{m.title}</span><Chip color={m.status === 'concluida' ? '#00f5a0' : m.status === 'falhou' ? '#ff537a' : '#39d6ff'}>{m.status.replace('_', ' ')}</Chip></p>
+        <p className="mb-1.5 font-extrabold">Projetos</p>
+        {appConfig.mode !== 'real' && <p className="text-lab-muted">Conecte o backend para ver projetos.</p>}
+        {appConfig.mode === 'real' && projects.length === 0 && <p className="text-lab-muted">Nenhum projeto ainda.</p>}
+        {projects.slice(0, 6).map((p) => (
+          <Link key={p.id} to={`/projetos/${p.id}`} className="flex items-center justify-between gap-2 border-b border-white/5 py-1 hover:text-neon-cyan">
+            <span className="truncate">{p.title}</span><Chip color={PROJECT_STATUS[p.status]?.color}>{PROJECT_STATUS[p.status]?.label}</Chip>
+          </Link>
         ))}
-        <label className="mt-2 flex items-center justify-between text-[11px] text-lab-muted">
-          Missões automáticas (demo)
-          <input type="checkbox" checked={running} onChange={(e) => setRunning(e.target.checked)} className="accent-[#00f5a0]" />
-        </label>
       </section>
     </div>
   )

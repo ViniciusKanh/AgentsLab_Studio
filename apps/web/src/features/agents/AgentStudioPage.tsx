@@ -7,6 +7,7 @@ import { AGENT_CHARACTERS } from '@/world/maps'
 import { personalityFor, PERSONALITY_LABELS } from '@/world/ambient/personality'
 import { ENVIRONMENTS, INTEGRATIONS_CATALOG, KNOWLEDGE_BASES, TOOLS_CATALOG } from '@/services/demo/demoData'
 import { Avatar, Chip, DemoTag, Field, Panel, Toggle, cx } from '@/components/ui/primitives'
+import { appConfig } from '@/services/config'
 import { providerIconUrl } from '@/lib/assets'
 import { ACCENTS, DEPARTMENTS, KNOWLEDGE_SOURCES, ROLE_PRESETS, STEPS, draftFromAgent, emptyDraft, validateStep, type Errors, type StepId } from './agentForm'
 
@@ -18,9 +19,10 @@ export default function AgentStudioPage() {
   const { agentId } = useParams()
   const [params] = useSearchParams()
   const nav = useNavigate()
-  const { agents, providers, saveAgent, loaded, credentials } = useLabStore()
+  const { agents, providers, saveAgent, loaded, credentials, organizations } = useLabStore()
+  const real = appConfig.mode === 'real'
   const editing = agents.find((a) => a.id === agentId)
-  const [draft, setDraft] = useState<AgentDraft>(() => (editing ? draftFromAgent(editing) : emptyDraft({ name: params.get('nome') ?? undefined, objective: params.get('objetivo') ?? undefined, environmentId: params.get('ambiente') ?? undefined })))
+  const [draft, setDraft] = useState<AgentDraft>(() => (editing ? draftFromAgent(editing) : emptyDraft({ name: params.get('nome') ?? undefined, objective: params.get('objetivo') ?? undefined, environmentId: params.get('ambiente') ?? undefined, organizationId: params.get('organizacao') ?? undefined })))
   const [step, setStep] = useState<StepId>('identidade')
   const [errors, setErrors] = useState<Errors>({})
   const [saving, setSaving] = useState(false)
@@ -69,7 +71,7 @@ export default function AgentStudioPage() {
         <Sparkles size={28} className="text-neon-green" />
         <div>
           <h1 className="title-pixel text-[15px]">Studio de Agentes</h1>
-          <p className="text-[12px] text-lab-muted">{editing ? `Editando “${editing.name}” (v${editing.version})` : 'Criação e configuração de um novo agente'} · persistência local no modo demonstrativo</p>
+          <p className="text-[12px] text-lab-muted">{editing ? `Editando “${editing.name}” (v${editing.version})` : 'Criação e configuração de um novo agente'} · {real ? 'salvo no backend local' : 'offline: salvo apenas como exemplo local'}</p>
         </div>
         <button className="px-btn ghost ml-auto" style={{ ['--c' as string]: '#39d6ff' }} onClick={() => nav(-1)}><X size={14} /> Cancelar</button>
       </div>
@@ -124,7 +126,7 @@ export default function AgentStudioPage() {
         </Panel>
 
         {/* formulário da etapa */}
-        <Panel accent="cyan" title={`${idx + 1}. ${STEPS[idx].label}`} actions={<DemoTag label="LOCAL" />}>
+        <Panel accent="cyan" title={`${idx + 1}. ${STEPS[idx].label}`} actions={real ? undefined : <DemoTag label="OFFLINE" />}>
           <div className="space-y-3">
             {step === 'identidade' && (
               <>
@@ -134,7 +136,22 @@ export default function AgentStudioPage() {
                   <input className="px-input" list="roles" value={draft.role} onChange={(e) => patch('role', e.target.value)} />
                   <datalist id="roles">{ROLE_PRESETS.map((r) => <option key={r} value={r} />)}</datalist>
                 </Field>
-                <Field label="Departamento"><select className="px-input" value={draft.department} onChange={(e) => patch('department', e.target.value)}>{DEPARTMENTS.map((d) => <option key={d}>{d}</option>)}</select></Field>
+                {real && (
+                  <Field label="Organização" hint="Equipe com a qual o agente trabalha nos projetos">
+                    <select className="px-input" value={draft.organizationId ?? ''} onChange={(e) => {
+                      const org = organizations.find((o) => o.id === e.target.value)
+                      setDraft((d) => ({ ...d, organizationId: e.target.value || null, environmentId: org?.environmentId ?? d.environmentId, department: org?.departments[0]?.name ?? d.department, stationId: null }))
+                    }} data-testid="agent-org">
+                      <option value="">Sem organização</option>
+                      {organizations.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                    </select>
+                  </Field>
+                )}
+                <Field label="Departamento">
+                  <input className="px-input" list="departments" value={draft.department} onChange={(e) => patch('department', e.target.value)} />
+                  <datalist id="departments">{(organizations.find((o) => o.id === draft.organizationId)?.departments.map((d) => d.name) ?? DEPARTMENTS).map((d) => <option key={d} value={d} />)}</datalist>
+                </Field>
+                {real && <Field label="Coordenador da organização" hint="Interpreta solicitações e propõe o plano dos projetos"><Toggle checked={!!draft.isCoordinator} onChange={(v) => patch('isCoordinator', v)} label="Coordenador" /></Field>}
                 <Field label="Ambiente de trabalho"><select className="px-input" value={draft.environmentId} onChange={(e) => setDraft((d) => ({ ...d, environmentId: e.target.value, stationId: null }))}>{ENVIRONMENTS.filter((e) => e.availability === 'implemented').map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select></Field>
                 <Field label="Descrição curta"><input className="px-input" value={draft.description} onChange={(e) => patch('description', e.target.value)} placeholder="Aparece nos cards" /></Field>
                 <Field label="Tags" hint="Separe por vírgula"><input className="px-input" value={draft.tags.join(', ')} onChange={(e) => patch('tags', e.target.value.split(',').map((t) => t.trim()).filter(Boolean).slice(0, 6))} placeholder="Pesquisa, Acadêmico, RAG" /></Field>
@@ -151,7 +168,7 @@ export default function AgentStudioPage() {
                   {providers.map((p) => (
                     <button key={p.id} onClick={() => patchIn('intelligence', { provider: p.id, model: p.defaultModel, credentialId: null })} className={cx('px-inset flex flex-col items-center gap-1 p-2 text-[11px] font-bold', draft.intelligence.provider === p.id && 'border-neon-green shadow-[0_0_8px_-2px_#00f5a0]')} aria-pressed={draft.intelligence.provider === p.id}>
                       <img src={providerIconUrl(p.id)} className="pixel h-7 w-7" alt="" />{p.name}
-                      <span className="text-[9px] font-normal text-lab-muted">{p.status === 'connected' ? 'conectado (demo)' : 'não configurado'}</span>
+                      <span className="text-[9px] font-normal text-lab-muted">{!real ? 'offline' : p.kind === 'local' ? 'local' : credentials.some((c) => c.provider === p.id) ? 'chave cadastrada' : 'sem chave'}</span>
                     </button>
                   ))}
                 </div>
@@ -188,6 +205,7 @@ export default function AgentStudioPage() {
                         <input type="checkbox" checked={on} onChange={() => patch('tools', on ? draft.tools.filter((x) => x !== t.id) : [...draft.tools, t.id])} className="accent-[#00f5a0]" />
                         <span className="flex-1">{t.name}</span>
                         <Chip color={t.risk === 'alto' ? '#ff537a' : t.risk === 'médio' ? '#ffb800' : '#00f5a0'}>risco {t.risk}</Chip>
+                        {!t.implemented && <Chip color="#9d62ff">planejada</Chip>}
                       </label>
                     )
                   })}
@@ -228,7 +246,7 @@ export default function AgentStudioPage() {
                       <option value="none">Sem memória</option><option value="short">Curto prazo (sessão)</option><option value="long">Longo prazo (persistente)</option>
                     </select>
                   </Field>
-                  <div className="px-inset flex items-center justify-between px-2 py-1.5 text-[11.5px]">Base RAG (recuperação semântica)<Toggle checked={draft.knowledge.ragEnabled} onChange={(v) => patchIn('knowledge', { ragEnabled: v, ragBaseId: v ? draft.knowledge.ragBaseId ?? 'kb-dw' : null })} label="Ativar RAG" /></div>
+                  <div className="px-inset flex items-center justify-between px-2 py-1.5 text-[11.5px]">Base RAG (recuperação semântica · planejada)<Toggle checked={draft.knowledge.ragEnabled} onChange={(v) => patchIn('knowledge', { ragEnabled: v, ragBaseId: v ? draft.knowledge.ragBaseId ?? 'kb-dw' : null })} label="Ativar RAG" /></div>
                   {draft.knowledge.ragEnabled && (
                     <Field label="Base de conhecimento" error={errors.ragBaseId}>
                       <select className="px-input" value={draft.knowledge.ragBaseId ?? ''} onChange={(e) => patchIn('knowledge', { ragBaseId: e.target.value || null })}>

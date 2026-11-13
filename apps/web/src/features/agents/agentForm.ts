@@ -11,7 +11,7 @@ export const ACCENTS = ['#00f5a0', '#39d6ff', '#9d62ff', '#ffb800', '#ff537a', '
 
 export const KNOWLEDGE_SOURCES = ['Base corporativa', 'Artigos científicos', 'Web', 'Documentação técnica', 'Tickets de suporte', 'Planilhas']
 
-export function emptyDraft(defaults?: { name?: string; objective?: string; environmentId?: string }): AgentDraft {
+export function emptyDraft(defaults?: { name?: string; objective?: string; environmentId?: string; organizationId?: string }): AgentDraft {
   return {
     name: defaults?.name ?? '',
     role: 'Pesquisador(a)',
@@ -20,12 +20,14 @@ export function emptyDraft(defaults?: { name?: string; objective?: string; envir
     objective: defaults?.objective ?? '',
     appearance: { characterId: 'pesquisadora', accentColor: '#39d6ff' },
     environmentId: defaults?.environmentId === 'research' ? 'research' : 'office',
+    organizationId: defaults?.organizationId ?? null,
+    isCoordinator: false,
     stationId: null,
     intelligence: {
       provider: 'gemini', model: 'gemini-2.5-flash', behavior: 'analitico', temperature: 0.4, topP: 0.9, maxOutputTokens: 2048, credentialId: null,
       instructions: 'Você é um agente do AgentsLab_Studio. Responda em português do Brasil, cite fontes verificáveis e explique suas decisões.',
     },
-    tools: ['web_search'],
+    tools: ['literature_search'],
     permissions: { readFiles: true, writeFiles: false, internet: true, externalApis: false, sensitiveRequiresApproval: true },
     integrations: [],
     knowledge: { sources: [], documents: [], memory: 'short', ragEnabled: false, ragBaseId: null },
@@ -37,8 +39,8 @@ export function emptyDraft(defaults?: { name?: string; objective?: string; envir
 }
 
 export function draftFromAgent(a: Agent): AgentDraft {
-  const { createdAt: _c, updatedAt: _u, stats: _s, level: _l, xp: _x, version: _v, origin: _o, ...draft } = a
-  void _c; void _u; void _s; void _l; void _x; void _v; void _o
+  const { createdAt: _c, updatedAt: _u, stats: _s, version: _v, origin: _o, ...draft } = a
+  void _c; void _u; void _s; void _v; void _o
   return JSON.parse(JSON.stringify(draft)) as AgentDraft
 }
 

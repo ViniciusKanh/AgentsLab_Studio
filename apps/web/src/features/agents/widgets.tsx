@@ -1,84 +1,15 @@
 import { useMemo, useState, type CSSProperties } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { AlertTriangle, CheckCircle2, ChevronRight, Copy, Crown, Eye, FileUp, Loader2, MoreVertical, Pencil, Plus, Search, Settings2, Trash2, XCircle, Zap, Activity, FolderKanban, Workflow as WorkflowIcon, Database, Plug } from 'lucide-react'
-import type { Agent, DashboardData, ExecutionRun, Provider, TokenPoint } from '@/types/domain'
-import { Avatar, Chip, PixelIcon, ProgressBar, Tabs, Toggle, cx } from '@/components/ui/primitives'
-import { PROVIDER_COLORS, asset, providerIconUrl } from '@/lib/assets'
-import { fmtClock, fmtCompact, fmtInt, timeAgo } from '@/lib/format'
+import { AlertTriangle, CheckCircle2, Copy, Eye, Loader2, MoreVertical, Pencil, Plus, Search, Settings2, Trash2, XCircle, Activity } from 'lucide-react'
+import type { Agent, ExecutionRun, Provider } from '@/types/domain'
+import { Avatar, Chip, Tabs, Toggle, cx } from '@/components/ui/primitives'
+import { providerIconUrl } from '@/lib/assets'
+import { fmtClock, fmtCompact, timeAgo } from '@/lib/format'
 import { useLabStore } from '@/stores/labStore'
 import { envPath } from '@/world/maps'
 import { useSimulationStore } from '@/stores/simulationStore'
-import { MISSIONS, useGameStore } from '@/stores/gameStore'
 import { STATE_META } from '@/simulation/states'
 import { ConfirmModal } from '@/components/ui/Modal'
-
-// ---------------------------------------------------------------------------
-export function TokenUsageChart({ data, height = 190 }: { data: TokenPoint[]; height?: number }) {
-  const series = [
-    { key: 'huggingface', name: 'Hugging Face' },
-    { key: 'openai', name: 'OpenAI' },
-    { key: 'groq', name: 'Groq' },
-    { key: 'gemini', name: 'Gemini' },
-  ] as const
-  return (
-    <div className="flex h-full flex-col">
-      <div className="min-h-0 flex-1" style={{ minHeight: height }}>
-        <ResponsiveContainer width="100%" height="100%" minHeight={height}>
-          <AreaChart data={data} margin={{ top: 6, right: 8, left: -6, bottom: 0 }}>
-            <defs>
-              {series.map((s) => (
-                <linearGradient key={s.key} id={`g-${s.key}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={PROVIDER_COLORS[s.key]} stopOpacity={0.95} />
-                  <stop offset="100%" stopColor={PROVIDER_COLORS[s.key]} stopOpacity={0.55} />
-                </linearGradient>
-              ))}
-            </defs>
-            <CartesianGrid stroke="#26335e" strokeDasharray="2 4" vertical={false} />
-            <XAxis dataKey="label" tickLine={false} axisLine={{ stroke: '#26335e' }} />
-            <YAxis tickLine={false} axisLine={false} tickFormatter={(v: number) => fmtCompact(v)} width={44} />
-            <Tooltip formatter={(v) => fmtInt(Number(v))} labelStyle={{ color: '#e6ecff', fontWeight: 700 }} itemStyle={{ fontSize: 11 }} />
-            {series.map((s) => (
-              <Area key={s.key} type="linear" dataKey={s.key} name={s.name} stackId="1" stroke={PROVIDER_COLORS[s.key]} strokeWidth={2} fill={`url(#g-${s.key})`} isAnimationActive={false} dot={s.key === 'gemini' ? { r: 2.5, fill: '#fff', stroke: '#3b82f6' } : false} />
-            ))}
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
-      <div className="mt-1 flex flex-wrap justify-center gap-x-4 gap-y-1 text-[11px] font-bold">
-        {[...series].reverse().map((s) => (
-          <span key={s.key} className="flex items-center gap-1.5"><i className="inline-block h-2.5 w-2.5 rounded-[2px]" style={{ background: PROVIDER_COLORS[s.key] }} />{s.name}</span>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-const RANK_COLORS = ['#ffb800', '#c9d3e6', '#ff8a3d', '#8b97c4']
-
-export function TopAgents({ data }: { data: DashboardData['topAgents'] }) {
-  const agents = useLabStore((s) => s.agents)
-  const nav = useNavigate()
-  return (
-    <ol className="space-y-1.5">
-      {data.map((t, i) => {
-        const a = agents.find((x) => x.id === t.agentId)
-        if (!a) return null
-        return (
-          <li key={t.agentId} className="flex items-center gap-2.5 border-b border-white/5 pb-1.5 last:border-0">
-            <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full border-2 text-[11px] font-extrabold text-[#04120c]" style={{ background: RANK_COLORS[i], borderColor: '#0b1228' }}>{i + 1}</span>
-            <Avatar characterId={a.appearance.characterId} size={34} ring={a.appearance.accentColor} />
-            <button className="min-w-0 flex-1 text-left" onClick={() => nav(`/agentes/${a.id}`)}>
-              <p className="truncate text-[12.5px] font-extrabold">{a.name}</p>
-              <p className="truncate text-[10.5px] text-lab-muted">{a.description}</p>
-            </button>
-            <Chip color="#00f5a0" className="text-[10.5px]">{fmtInt(t.runs)} runs</Chip>
-          </li>
-        )
-      })}
-    </ol>
-  )
-}
 
 // ---------------------------------------------------------------------------
 export function ProvidersPanel({ providers, compact }: { providers: Provider[]; compact?: boolean }) {
@@ -99,7 +30,7 @@ export function ProvidersPanel({ providers, compact }: { providers: Provider[]; 
           </span>
           <Chip color="#9d62ff" className="hidden 2xl:inline-flex">{p.badge}</Chip>
           <Toggle checked={p.enabled} onChange={(v) => update(p.id, { enabled: v })} label={`Ativar ${p.name}`} disabled={p.status === 'not_configured'} />
-          <button className="text-lab-muted hover:text-neon-cyan" aria-label={`Configurar ${p.name}`} onClick={() => nav(`/modelos?provider=${p.id}`)}><Settings2 size={15} /></button>
+          <button className="text-lab-muted hover:text-neon-cyan" aria-label={`Configurar ${p.name}`} onClick={() => nav(`/provedores?provider=${p.id}`)}><Settings2 size={15} /></button>
         </li>
       ))}
     </ul>
@@ -211,65 +142,6 @@ export function RecentRuns({ runs, max = 5 }: { runs: ExecutionRun[]; max?: numb
 }
 
 // ---------------------------------------------------------------------------
-export function MissionsPanel() {
-  const counters = useGameStore((s) => s.counters)
-  const claimed = useGameStore((s) => s.claimed)
-  const done = MISSIONS.filter((m) => claimed.includes(m.id) || m.progress(counters) >= m.target).length
-  const current = MISSIONS.find((m) => !claimed.includes(m.id)) ?? MISSIONS[MISSIONS.length - 1]
-  const prog = Math.min(current.target, current.progress(counters))
-  return (
-    <div className="flex h-full items-center gap-3">
-      <img src={asset('ui/chest.png')} alt="" className="pixel hidden h-14 w-auto sm:block" />
-      <div className="min-w-0 flex-1">
-        <p className="text-[11px] text-lab-muted">Evolua seu lab completando desafios.</p>
-        <div className="mt-1.5 flex items-center gap-2">
-          <ProgressBar value={done / MISSIONS.length} className="flex-1" />
-          <span className="text-[11px] font-extrabold">{done}/{MISSIONS.length}</span>
-        </div>
-      </div>
-      <Link to="/gamificacao?tab=missoes" className="px-inset group block w-[46%] min-w-[170px] px-2.5 py-1.5 hover:border-neon-gold/70">
-        <p className="flex items-center gap-1 text-[11px] font-extrabold text-neon-gold"><Crown size={12} /> Missão Atual</p>
-        <p className="truncate text-[11.5px]">{current.title}</p>
-        <p className="flex items-center justify-between text-[11px] font-bold">
-          <span className="flex items-center gap-1"><PixelIcon name="star" size={14} /> +{current.rewardXp} XP · {prog}/{current.target}</span>
-          <ChevronRight size={14} className="text-lab-muted group-hover:text-neon-gold" />
-        </p>
-      </Link>
-    </div>
-  )
-}
-
-export function QuickActions() {
-  const nav = useNavigate()
-  return (
-    <div className="grid h-full grid-cols-2 gap-2 xl:grid-cols-4">
-      <button className="px-btn c-green" onClick={() => nav('/agentes/novo')}><Plus size={14} /> Novo Agente</button>
-      <button className="px-btn c-cyan" style={{ ['--c' as string]: '#39d6ff' }} onClick={() => nav('/laboratorio')}><Zap size={14} /> Nova Tarefa</button>
-      <button className="px-btn" style={{ ['--c' as string]: '#9d62ff' }} onClick={() => nav('/workflows?novo=1')}><WorkflowIcon size={14} /> Novo Fluxo</button>
-      <button className="px-btn" style={{ ['--c' as string]: '#ffb800' }} onClick={() => nav('/conhecimento')}><FileUp size={14} /> Importar Docs</button>
-    </div>
-  )
-}
-
-export function LabActivity({ counters }: { counters: DashboardData['counters'] }) {
-  const items = [
-    { label: 'Projetos', value: counters.projects, to: '/projetos', icon: FolderKanban },
-    { label: 'Fluxos', value: counters.workflows, to: '/workflows', icon: WorkflowIcon },
-    { label: 'Bases (RAG)', value: counters.ragBases, to: '/conhecimento', icon: Database },
-    { label: 'Integrações', value: counters.integrations, to: '/ferramentas', icon: Plug },
-  ]
-  return (
-    <div className="grid h-full grid-cols-4 gap-1.5">
-      {items.map((it) => (
-        <Link key={it.label} to={it.to} className="px-inset flex flex-col items-center justify-center py-1 text-center hover:border-neon-cyan/60">
-          <span className="text-[10.5px] text-lab-muted">{it.label}</span>
-          <span className="title-pixel text-[13px]">{it.value}</span>
-        </Link>
-      ))}
-    </div>
-  )
-}
-
 export function LiveLogs({ max = 6 }: { max?: number }) {
   const logs = useSimulationStore((s) => s.logs)
   const list = logs.slice(-max)
@@ -283,27 +155,6 @@ export function LiveLogs({ max = 6 }: { max?: number }) {
         </p>
       ))}
     </div>
-  )
-}
-
-export function ExperimentsTable({ data }: { data: DashboardData['experiments'] }) {
-  return (
-    <table className="w-full text-[11px]">
-      <thead className="text-left text-lab-muted">
-        <tr><th className="pb-1 font-bold">Experimento</th><th className="pb-1 font-bold">Modelo</th><th className="pb-1 font-bold">Métrica (↑)</th><th className="pb-1 font-bold">Status</th><th className="pb-1 font-bold">Data</th></tr>
-      </thead>
-      <tbody>
-        {data.map((e) => (
-          <tr key={e.id} className="border-t border-white/5">
-            <td className="py-1 pr-2 font-bold">{e.name}</td>
-            <td className="py-1 pr-2"><span className="flex items-center gap-1.5"><img src={providerIconUrl(e.provider)} className="pixel h-4 w-4" alt="" />{e.model}</span></td>
-            <td className="py-1 pr-2">{e.metric}: <b>{e.value.toLocaleString('pt-BR')}</b></td>
-            <td className="py-1 pr-2">{e.status === 'done' ? <Chip color="#00f5a0">Concluído</Chip> : e.status === 'running' ? <Chip color="#39d6ff">Em execução</Chip> : <Chip color="#ff537a">Falhou</Chip>}</td>
-            <td className="py-1 text-lab-muted">{new Date(e.date).toLocaleDateString('pt-BR')}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
   )
 }
 

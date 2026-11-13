@@ -1,0 +1,5 @@
+[tool.pytest.ini_options]
+# Corrige o CI: permite `from app...` ao rodar `pytest` dentro de apps/api
+pythonpath = ["."]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]

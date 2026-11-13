@@ -17,6 +17,8 @@ export interface WorldEvents {
   'camera:zoom': { factor: number }
   'speech': { agentId: string; text: string; kind: 'ambiente' | 'operacional-demo' | 'operacional-real'; ttl: number }
   'feed': FeedItem
+  /** Mensagem REAL registrada no backend (balões e entregas no mundo). */
+  'agent:message': { fromAgentId: string | null; toAgentId: string | null; type: string; content: string }
 }
 
 type Handler<T> = (payload: T) => void

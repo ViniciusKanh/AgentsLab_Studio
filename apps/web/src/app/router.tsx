@@ -3,7 +3,6 @@ import { createBrowserRouter, Link, Navigate, useRouteError } from 'react-router
 import { AppShell } from '@/components/layout/AppShell'
 
 const WorldPage = lazy(() => import('@/features/world/WorldPage'))
-const DashboardPage = lazy(() => import('@/features/dashboard/DashboardPage'))
 const EnvironmentsPage = lazy(() => import('@/features/environments/EnvironmentsPage'))
 const EnvironmentViewPage = lazy(() => import('@/features/environments/EnvironmentsPage').then((m) => ({ default: m.EnvironmentViewPage })))
 const AgentsPage = lazy(() => import('@/features/agents/AgentsPage'))
@@ -11,11 +10,12 @@ const AgentStudioPage = lazy(() => import('@/features/agents/AgentStudioPage'))
 const AgentProfilePage = lazy(() => import('@/features/agents/AgentProfilePage'))
 const WorkflowStudioPage = lazy(() => import('@/features/workflows/WorkflowStudioPage'))
 const ModelsPage = lazy(() => import('@/features/models/ModelsPage'))
-const KnowledgePage = lazy(() => import('@/features/knowledge/KnowledgePage'))
 const RunsPage = lazy(() => import('@/features/analytics/RunsPage'))
-const GamificationPage = lazy(() => import('@/features/gamification/GamificationPage'))
 const SettingsPage = lazy(() => import('@/features/settings/SettingsPage'))
-const PlannedPage = lazy(() => import('@/features/planned/PlannedPage'))
+const OrganizationsPage = lazy(() => import('@/features/organizations/OrganizationsPage'))
+const ProjectsPage = lazy(() => import('@/features/projects/ProjectsPage'))
+const ProjectWorkspacePage = lazy(() => import('@/features/projects/ProjectWorkspacePage'))
+const DocumentsPage = lazy(() => import('@/features/documents/DocumentsPage'))
 
 const S = (el: ReactNode) => <Suspense fallback={<p className="title-pixel animate-blink p-6 text-[10px] text-lab-muted">Carregando…</p>}>{el}</Suspense>
 
@@ -52,24 +52,27 @@ export const routes = [
       { index: true, element: S(<WorldPage />), handle: immersive },
       { path: 'escritorio', element: S(<WorldPage key="office" envId="office" />), handle: immersive },
       { path: 'laboratorio', element: S(<WorldPage key="research" envId="research" />), handle: immersive },
-      { path: 'painel', element: S(<DashboardPage />) },
+      { path: 'organizacoes', element: S(<OrganizationsPage />) },
       { path: 'ambientes', element: S(<EnvironmentsPage />) },
       { path: 'ambientes/:envId', element: S(<EnvironmentViewPage />) },
       { path: 'agentes', element: S(<AgentsPage />) },
       { path: 'agentes/novo', element: S(<AgentStudioPage key="novo" />) },
       { path: 'agentes/:agentId', element: S(<AgentProfilePage />) },
       { path: 'agentes/:agentId/editar', element: S(<AgentStudioPage />) },
-      { path: 'workflows', element: S(<WorkflowStudioPage />) },
-      { path: 'modelos', element: S(<ModelsPage />) },
-      { path: 'conhecimento', element: S(<KnowledgePage />) },
+      { path: 'projetos', element: S(<ProjectsPage />) },
+      { path: 'projetos/:projectId', element: S(<ProjectWorkspacePage />) },
+      { path: 'fluxos', element: S(<WorkflowStudioPage />) },
+      { path: 'documentos', element: S(<DocumentsPage />) },
       { path: 'execucoes', element: S(<RunsPage />) },
-      { path: 'gamificacao', element: S(<GamificationPage />) },
+      { path: 'provedores', element: S(<ModelsPage />) },
       { path: 'configuracoes', element: S(<SettingsPage />) },
-      { path: 'projetos', element: S(<PlannedPage id="projetos" />) },
-      { path: 'ferramentas', element: S(<PlannedPage id="ferramentas" />) },
-      { path: 'experimentos', element: S(<PlannedPage id="experimentos" />) },
-      { path: 'avaliacao', element: S(<PlannedPage id="avaliacao" />) },
-      { path: 'dashboard', element: <Navigate to="/painel" replace /> },
+      // endereços antigos
+      { path: 'workflows', element: <Navigate to="/fluxos" replace /> },
+      { path: 'modelos', element: <Navigate to="/provedores" replace /> },
+      { path: 'conhecimento', element: <Navigate to="/documentos" replace /> },
+      { path: 'painel', element: <Navigate to="/" replace /> },
+      { path: 'dashboard', element: <Navigate to="/" replace /> },
+      { path: 'gamificacao', element: <Navigate to="/" replace /> },
       { path: '*', element: <NotFound /> },
     ],
   },

@@ -15,6 +15,7 @@ on:
     paths:
       - 'apps/web/src/**'
       - 'apps/web/public/**'
+      - 'apps/api/app/**'
       - 'tools/pixelart/**'
       - '.github/workflows/showcase.yml'
 
@@ -38,6 +39,13 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: apps/api/requirements.txt
+      - name: Dependências da API (modo de teste)
+        run: pip install -r ../api/requirements.txt
       - run: npm ci
       - run: npm run build
       - run: npx playwright install --with-deps chromium

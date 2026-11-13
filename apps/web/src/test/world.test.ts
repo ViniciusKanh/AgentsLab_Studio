@@ -91,4 +91,25 @@ describe('AmbientWorld (camada ambiental)', () => {
     expect([a.x, a.y]).toEqual(p)
     expect(a.activity).toBe('paused')
   })
+
+  it('entrega real: remetente caminha até o colega e fala o texto da mensagem do backend', () => {
+    const spoken: [string, string, string][] = []
+    const w = new AmbientWorld(office, { speech: (id, text, kind) => spoken.push([id, text, kind]) }, seeded(4))
+    w.setActors([0, 1].map((i) => ({ id: `a${i}`, name: `Agente ${i}`, role: 'T', characterId: 'analista', robot: false, stationId: null })))
+    const [a, b] = w.list()
+    w.deliver('a0', 'a1', 'Achados prontos')
+    for (let i = 0; i < 2000 && !spoken.length; i++) w.tick(50)
+    expect(spoken[0]).toEqual(['a0', 'Achados prontos', 'operacional-real'])
+    const ta = pxToTile(office, a.x, a.y), tb = pxToTile(office, b.x, b.y)
+    expect(Math.abs(ta.x - tb.x) + Math.abs(ta.y - tb.y)).toBeLessThanOrEqual(6)
+  })
+
+  it('conversas ambientais nunca afirmam progresso de trabalho', () => {
+    const spoken: string[] = []
+    const w = new AmbientWorld(office, { speech: (_id, text, kind) => { if (kind === 'ambiente') spoken.push(text) } }, seeded(21))
+    w.setActors(Array.from({ length: 8 }, (_, i) => ({ id: `a${i}`, name: `A${i}`, role: 'T', characterId: 'analista', robot: false, stationId: null })))
+    for (let i = 0; i < 8000; i++) w.tick(50)
+    expect(spoken.length).toBeGreaterThan(0)
+    expect(spoken.join(' ')).not.toMatch(/conclu|entrega|relat|experimento|resultado|dados|modelo/i)
+  })
 })

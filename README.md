@@ -1,102 +1,101 @@
 # AgentsLab_Studio
 
-**Um pequeno mundo virtual de inteligências artificiais.** Agentes em pixel art 16-bit circulam por um escritório e um laboratório de pesquisa, trabalham em estações, tomam café, conversam, colaboram e executam missões — e cada personagem representa um agente configurável (modelo, chave de API, ferramentas, limites e personalidade).
+**Plataforma de organizações multiagentes com visual pixel art.** Você descreve um trabalho em linguagem natural; o agente coordenador da organização propõe um plano; você aprova ou ajusta; os agentes executam tarefas reais (chamadas a LLMs e a ferramentas de pesquisa), trocam entregas, consolidam um documento, revisam e produzem versões a partir do seu feedback. O escritório e o laboratório em pixel art mostram esse trabalho acontecendo: estados, mensagens e entregas dos personagens vêm do backend.
 
-![Escritório virtual](docs/media/demo-escritorio.gif)
+![Laboratório durante um projeto](docs/media/demo-laboratorio.gif)
 
-| Escritório | Laboratório de Pesquisa |
+| Plano proposto pelo coordenador | Entrega versionada com referências |
 |---|---|
-| ![Escritório](docs/media/escritorio.png) | ![Laboratório](docs/media/laboratorio.png) |
-| ![Agente selecionado](docs/media/agente-selecionado.png) | ![Zoom](docs/media/escritorio-zoom.png) |
+| ![Plano](docs/media/projeto-plano.png) | ![Entrega](docs/media/projeto-entrega.png) |
+| ![Organizações](docs/media/organizacoes.png) | ![Custos](docs/media/custos.png) |
 
-> **v1.1 — Fase 1 (frontend) com modo demonstrativo.** Tudo que aparece com o selo **DEMO** é simulado localmente: nenhum LLM é chamado e nenhum custo real é gerado. O cofre de credenciais do backend já está implementado (ver “Chaves de API”).
+> As capturas acima são geradas automaticamente com a API em **modo de teste** (respostas determinísticas, sem LLM real) para não depender de chaves no CI. Com suas chaves, o mesmo fluxo usa os modelos reais.
 
-## O que há de novo (redesign imersivo — “Environment First”)
+## v1.2 — o que mudou
 
-- **Cenário como protagonista:** Escritório (mezanino, escadas, cafeteria, mesa colaborativa, janelas para a cidade) e Laboratório (núcleo neural com cérebro holográfico, passarelas, bancadas, mesa holográfica).
-- **Agentes autônomos:** navegação A\* em tilemap com colisões, uso de objetos (computadores, café, estantes, sofás, equipamentos), conversas com balões, emotes, celebrações, visitas a outras áreas — tudo **local, sem consumir tokens**.
-- **Personalidade configurável** (sociabilidade, criatividade, organização, curiosidade, colaboração, iniciativa) influenciando o comportamento.
-- **Duas camadas separadas:** simulação ambiental × inteligência operacional. Tarefas têm prioridade: ao receber uma missão o agente larga o café e vai para a estação.
-- **Interface enxuta:** barra superior compacta, menu lateral recolhível, painel contextual do agente (status, chat, histórico, interações), faixa de eventos recolhível, modo observador (tela cheia) e modo gerenciamento.
-- **Câmera:** arrastar, zoom com a roda, duplo clique para seguir um agente.
-- **Chaves de API por agente:** vários perfis por provedor (ex.: *Gemini · chave 1* e *Gemini · chave 2*), cada agente usa o seu.
-- **GitHub Actions:** CI, vitrine visual (prints, vídeo e GIF gerados automaticamente) e release com bundle.
+- **Sem gamificação:** XP, níveis, missões-RPG, recompensas, créditos e conquistas foram removidos. O estilo pixel art permanece.
+- **Organizações e departamentos** (Laboratório de Pesquisa em IA, Escritório Empresarial; modelo Fábrica de Software), cada uma com coordenador e equipe.
+- **Projetos por prompt** com aprovação humana do plano, execução com dependências, mensagens estruturadas (solicitação, entrega, revisão, orientação, feedback…), consolidação, revisão e **documentos versionados com diff**.
+- **Evidências rastreáveis:** fontes reais do OpenAlex e arXiv (DOI/URL), marcação “apenas resumo”, referências geradas pelo sistema (o modelo não escreve a lista) e detecção de citações inexistentes.
+- **Custos e limites:** cada chamada é registrada (tokens, latência, custo estimado pelo LiteLLM) por agente, projeto, modelo e provedor; orçamento por projeto pausa a execução.
+- **Mundo conectado ao backend:** estados reais, balões com mensagens reais e entregas (o agente caminha até o colega). A ambientação (café, conversas sociais) nunca afirma progresso de trabalho.
+- **Chaves digitadas no app → cofre do sistema operacional** (Windows: Gerenciador de Credenciais).
 
-## Chaves de API (Gemini, Groq, OpenAI, Hugging Face, Ollama)
+## Chaves de API
 
-Sim — você cadastra as chaves **pelo próprio app** e pode ter **várias por provedor**, escolhendo qual cada agente usa:
+1. Inicie o backend (abaixo) — o app mostra **Conectado** na barra superior.
+2. **Provedores e Custos → Chaves (API) → Novo perfil**: provedor, apelido e a chave.
+3. **Agent Studio → Inteligência → Chave de API**: escolha o perfil de cada agente (ou deixe o padrão do provedor, marcado com ★).
 
-1. **Modelos → Chaves (API)** → *Novo perfil de chave*: provedor + apelido (ex.: `Gemini · chave 2 (BI)`) + chave.
-2. **Agent Studio → Inteligência → Chave de API (perfil)**: selecione o perfil para aquele agente (ou “Padrão do provedor”).
+A chave sai do navegador uma única vez para o backend local, que a guarda no **cofre do sistema** via `keyring` (Windows: Gerenciador de Credenciais/DPAPI; macOS: Keychain; Linux: Secret Service). O banco guarda só apelido e os 4 últimos dígitos; a API nunca devolve a chave. Sem cofre disponível (CI/servidor), use `AGENTSLAB_SECRET_BACKEND=file` + `AGENTSLAB_MASTER_KEY` (arquivo criptografado com Fernet).
 
-Segurança (por que a chave não fica no navegador):
-- O frontend é um site estático público; qualquer valor nele (inclusive `VITE_*` e `localStorage`) pode ser lido. Por isso a chave é **enviada uma única vez ao backend** (`POST /api/v1/credentials`), que a **criptografa (Fernet)** com `AGENTSLAB_MASTER_KEY` e devolve só apelido + últimos 4 dígitos.
-- No **modo demo** (sem backend) você cria os perfis e os associa aos agentes, mas o campo da chave fica desativado.
-- Para usar chaves de verdade: suba `apps/api` (ver abaixo) e publique o frontend com `VITE_APP_MODE=real` e `VITE_API_BASE_URL=https://sua-api`.
+**Microsoft Store (planejado):** empacotar com Tauri 2 (frontend) + backend Python como *sidecar* (PyInstaller) em MSIX — o mesmo modelo de chaves no cofre do Windows. Detalhes em [docs/PLANO_ADAPTACAO.md](docs/PLANO_ADAPTACAO.md).
 
-## Instalação (Windows / PowerShell)
+## Como executar (Windows / PowerShell)
 
-```powershell
-cd C:\dev\AgentsLab_Studio\apps\web
-copy .env.example .env
-npm install
-npm run dev          # http://localhost:5173
-```
-
-| Comando | O que faz |
-|---|---|
-| `npm run build` | typecheck + build de produção (`dist/`) |
-| `npm test` | Vitest (A\*, motor ambiental, validações, stores, UI) |
-| `npx playwright install chromium` e `npm run e2e` | testes de fluxo no navegador |
-| `npm run media` | abre o app, interage e gera prints, vídeo (MP4) e GIF em `docs/media` (requer ffmpeg para GIF/MP4) |
-| `npm run assets` | regenera sprites, mapas e tilemaps (`pip install pillow`) |
-
-### Backend (cofre de credenciais + estrutura da API)
+Backend (onde os agentes executam):
 
 ```powershell
 cd C:\dev\AgentsLab_Studio\apps\api
 python -m venv .venv; .venv\Scripts\activate
 pip install -r requirements.txt
-copy .env.example .env   # preencha AGENTSLAB_MASTER_KEY (comando de geração no arquivo)
-uvicorn app.main:app --reload --port 8000
-pytest
+uvicorn app.main:app --port 8000
 ```
+
+Frontend (outro terminal):
+
+```powershell
+cd C:\dev\AgentsLab_Studio\apps\web
+npm install
+npm run dev          # http://localhost:5173
+```
+
+O banco SQLite fica em `apps/api/data/agentslab.db` (PostgreSQL: `AGENTSLAB_DATABASE_URL`). Sem backend, o app abre em **modo offline** com agentes de exemplo apenas para visualização — nada é executado.
+
+### Primeiro projeto (teste obrigatório)
+
+**Projetos → Novo projeto →** “Usar exemplo: pesquisa sobre IA na aeronáutica” → organização *Laboratório de Pesquisa em IA* → **Enviar ao coordenador** → revise/ajuste o plano → **Aprovar e iniciar**. Acompanhe no Laboratório ou na aba Tarefas; ao final, leia o relatório (aba Documentos), confira as evidências, envie feedback e compare as versões (Diff).
+
+## Testes
+
+| Comando | O que valida |
+|---|---|
+| `cd apps/api; pytest` | 12 testes: fluxo completo da aeronáutica (plano → edição → aprovação → dependências → evidências → consolidação → revisão automática → feedback → v3 + diff → aprovação → custos), cofre multi-chave, orçamento, cancelamento, chat, tarefa avulsa, CRUD |
+| `cd apps/web; npm test` | Vitest: A\*, motor ambiental (entregas reais, ambientação sem falso progresso), eventos SSE → estados, stores, UI |
+| `npm run e2e` | Playwright: offline + conectado à API de teste (chave → cofre, projeto completo no navegador) |
+| `npm run media` | gera prints, MP4 e GIF em `docs/media` |
+
+Os testes usam LLM e ferramentas **determinísticos** (`apps/api/tests/fakes.py`), carregados somente nos testes.
 
 ## Publicar no GitHub
 
 ```powershell
 cd C:\dev\AgentsLab_Studio
-powershell -ExecutionPolicy Bypass -File .\scripts\publicar-github.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\publicar-github.ps1 -Mensagem "feat: plataforma de organizações multiagentes"
 ```
-
-O script inicializa o Git, cria a branch `main`, aponta para `https://github.com/ViniciusKanh/AgentsLab_Studio.git` e faz o push (requer login no GitHub). Arquivos `.env` são ignorados.
-
-### GitHub Actions (`.github/workflows`)
 
 | Workflow | Quando | Resultado |
 |---|---|---|
-| **CI** (`ci.yml`) | push/PR | build, Vitest, Playwright (E2E) e pytest; artefatos `agentslab-web-dist` e `e2e-results` |
-| **Showcase** (`showcase.yml`) | push na `main` (UI/assets) ou manual | abre o app no Chromium, interage, tira prints, grava vídeo, gera GIF/MP4; artefato `agentslab-media` e commit automático em `docs/media` (README sempre atualizado) |
-| **Release** (`release.yml`) | tag `v*` (ex.: `git tag v1.1.0 && git push --tags`) | release com `agentslab-web-<tag>.zip` (site estático pronto) e `agentslab-api-<tag>.tar.gz` |
-
-## Deploy do frontend
-
-**Cloudflare Pages** ou **Vercel**: diretório raiz `apps/web`, build `npm run build`, saída `dist`. A Vercel usa `apps/web/vercel.json` (fallback SPA); o Cloudflare Pages faz o fallback nativamente. Variáveis: `VITE_APP_NAME`, `VITE_APP_MODE=demo|real`, `VITE_API_BASE_URL` (somente a URL pública da API — nunca segredos).
+| **CI** | push/PR | build, Vitest, E2E (com API de teste) e pytest |
+| **Showcase** | push na `main` ou manual | prints, vídeo e GIF commitados em `docs/media` |
+| **Release** | tag `v*` | zip do frontend + tarball da API |
 
 ## Estrutura
 
 ```
+apps/api/app
+  models.py              organizações, departamentos, agentes, projetos, tarefas, mensagens, artefatos+versões, evidências, execuções, aprovações, eventos
+  services/orchestrator  planejamento → aprovação → execução com dependências → consolidação → revisão → feedback
+  services/llm.py        LiteLLM (Gemini, Groq, OpenAI, Hugging Face, Ollama), custo por chamada
+  services/tools.py      OpenAlex + arXiv (fontes reais)
+  services/vault.py      cofre do SO (keyring) / Fernet
+  services/events.py     eventos persistidos + SSE com replay
+  routers/               credentials, organizations (+agents/chat/tarefas), projects, system (SSE, provedores, uso, visão geral)
 apps/web/src
-  world/            motor do mundo virtual (sem Phaser): mapas, A*, AmbientWorld, personalidade, diálogos, barramento de eventos
-  world/render/     Phaser (WorldScene), camada DOM de rótulos/balões, host React (WorldCanvas)
-  features/world/   tela imersiva: toolbar, painel contextual, faixa de eventos, gerenciamento, missões
-  features/*        Agentes, Agent Studio, Workflows, Modelos (chaves), Painel de métricas, etc.
-  simulation/       motor operacional DEMO (mesmo contrato de eventos do backend)
-  stores/           Zustand: lab, simulação operacional, mundo (UI), missões, chat, gamificação
-apps/api            FastAPI: /health, cofre de credenciais, rotas planejadas (501)
-tools/pixelart      gerador procedural: personagens (27 quadros), mapas 40×23, atlas de props, tilemap de navegação
-.github/workflows   CI, Showcase (mídia) e Release
-docs/               arquitetura, design system, telas, modelo de agentes, roadmap, mídia
+  features/projects      projetos e espaço de trabalho (plano, tarefas, mensagens, documentos, evidências, custos)
+  features/organizations, documents, analytics (execuções), models (provedores e custos), agents (Agent Studio)
+  world/                 mundo pixel art (A*, AmbientWorld, Phaser) alimentado por services/realtime.ts (SSE)
+tools/pixelart           gerador procedural de sprites e mapas
 ```
 
-Documentação: [Arquitetura](docs/ARCHITECTURE.md) · [Design System](docs/DESIGN_SYSTEM.md) · [Telas](docs/SCREENS.md) · [Agentes](docs/AGENT_MODEL.md) · [Roadmap](docs/ROADMAP.md) · [CLAUDE.md](CLAUDE.md)
+Documentação: [Plano de adaptação](docs/PLANO_ADAPTACAO.md) · [Arquitetura](docs/ARCHITECTURE.md) · [Roadmap](docs/ROADMAP.md) · [Design System](docs/DESIGN_SYSTEM.md) · [Agentes](docs/AGENT_MODEL.md) · [CLAUDE.md](CLAUDE.md)

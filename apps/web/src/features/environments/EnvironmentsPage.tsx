@@ -2,7 +2,6 @@ import { Link, Navigate, useParams } from 'react-router-dom'
 import { Building2, DoorOpen, Lock, Users } from 'lucide-react'
 import { ENVIRONMENTS } from '@/services/demo/demoData'
 import { useLabStore } from '@/stores/labStore'
-import { useLevel } from '@/stores/gameStore'
 import { useSimulationStore } from '@/stores/simulationStore'
 import { Chip, Panel, PlannedBadge, cx } from '@/components/ui/primitives'
 import { envPath } from '@/world/maps'
@@ -12,14 +11,13 @@ const thumb = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\//
 export default function EnvironmentsPage() {
   const agents = useLabStore((s) => s.agents)
   const runtime = useSimulationStore((s) => s.runtime)
-  const { level } = useLevel()
   return (
     <div className="flex flex-col gap-2.5" data-testid="environments-page">
       <div className="px-panel c-cyan flex items-center gap-3 px-3 py-2">
         <Building2 size={30} className="text-neon-cyan" />
         <div>
           <h1 className="title-pixel text-[15px]">Ambientes (Salas Temáticas)</h1>
-          <p className="text-[12px] text-lab-muted">Escolha uma sala para acompanhar seus agentes. Salas marcadas como <b>planejado</b> ainda não estão implementadas.</p>
+          <p className="text-[12px] text-lab-muted">Cada organização trabalha em um ambiente. Salas marcadas como <b>planejado</b> ainda não estão implementadas; o editor de ambientes (Environment Studio) está planejado.</p>
         </div>
       </div>
       <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2 xl:grid-cols-3">
@@ -31,7 +29,7 @@ export default function EnvironmentsPage() {
             <article key={e.id} className="px-panel flex flex-col overflow-hidden" style={{ ['--c' as string]: e.accent }} data-testid={`env-card-${e.id}`}>
               <div className="relative">
                 <img src={thumb(e.thumbnail)} alt={`Miniatura ${e.name}`} className={cx('pixel aspect-[2/1] w-full object-cover', !impl && 'opacity-60 saturate-50')} />
-                {!impl && <div className="absolute inset-0 grid place-items-center bg-[#050913]/40"><span className="flex items-center gap-1.5 rounded-[3px] border border-neon-purple bg-[#0b0820]/90 px-2 py-1 text-[11px] font-bold text-neon-purple"><Lock size={12} /> Planejado · desbloqueio no nível {e.unlockLevel}</span></div>}
+                {!impl && <div className="absolute inset-0 grid place-items-center bg-[#050913]/40"><span className="flex items-center gap-1.5 rounded-[3px] border border-neon-purple bg-[#0b0820]/90 px-2 py-1 text-[11px] font-bold text-neon-purple"><Lock size={12} /> Planejado</span></div>}
               </div>
               <div className="flex flex-1 flex-col gap-1.5 p-3">
                 <div className="flex items-center gap-2">
@@ -45,7 +43,7 @@ export default function EnvironmentsPage() {
                   {impl ? (
                     <Link to={envPath(e.id)} className="px-btn sm solid ml-auto"><DoorOpen size={13} /> Entrar</Link>
                   ) : (
-                    <span className="ml-auto text-[10.5px] text-lab-muted">{level >= e.unlockLevel ? 'Nível atingido — implementação na Fase 5' : `Requer nível ${e.unlockLevel}`}</span>
+                    <span className="ml-auto text-[10.5px] text-lab-muted">Ainda não implementado</span>
                   )}
                 </div>
               </div>

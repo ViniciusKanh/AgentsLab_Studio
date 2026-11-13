@@ -5,9 +5,10 @@ import { useLabStore } from '@/stores/labStore'
 import { envPath } from '@/world/maps'
 import { useSimulationStore } from '@/stores/simulationStore'
 import { STATE_META } from '@/simulation/states'
-import { Avatar, Chip, DemoTag, Panel, PlannedBadge, ProgressBar, Tabs, Toggle } from '@/components/ui/primitives'
+import { Avatar, Chip, DemoTag, Panel, PlannedBadge, Tabs, Toggle } from '@/components/ui/primitives'
 import { ConfirmModal } from '@/components/ui/Modal'
-import { RecentRuns } from '@/features/dashboard/widgets'
+import { useAgentUsage } from '@/hooks/useAgentUsage'
+import { appConfig } from '@/services/config'
 import { KNOWLEDGE_BASES, TOOLS_CATALOG } from '@/services/demo/demoData'
 import { fmtClock, fmtCompact, fmtInt, fmtUsd } from '@/lib/format'
 import { providerIconUrl } from '@/lib/assets'
@@ -20,16 +21,14 @@ export default function AgentProfilePage() {
   const { agents, setAgentStatus, duplicateAgent, deleteAgent, loaded } = useLabStore()
   const a = agents.find((x) => x.id === agentId)
   const rt = useSimulationStore((s) => (agentId ? s.runtime[agentId] : undefined))
-  const allRuns = useSimulationStore((s) => s.sessionRuns)
   const allLogs = useSimulationStore((s) => s.logs)
-  const runs = useMemo(() => allRuns.filter((r) => r.agentId === agentId), [allRuns, agentId])
+  const usage = useAgentUsage(agentId)
   const logs = useMemo(() => allLogs.filter((l) => l.agentId === agentId), [allLogs, agentId])
   const select = useSimulationStore((s) => s.select)
   const [tab, setTab] = useState<T>('geral')
   const [confirm, setConfirm] = useState(false)
   if (!a) return loaded ? <Panel title="Agente não encontrado"><Link to="/agentes" className="text-neon-cyan">← Voltar</Link></Panel> : null
   const meta = STATE_META[rt?.state ?? 'idle']
-  const xpNext = a.level * 600
   const demo = a.origin === 'demo'
   return (
     <div className="flex flex-col gap-2.5" data-testid="agent-profile">
@@ -57,17 +56,16 @@ export default function AgentProfilePage() {
               <dt className="text-lab-muted">Papel</dt><dd>{a.role} · {a.department}</dd>
               <dt className="text-lab-muted">Ferramentas</dt><dd className="flex flex-wrap gap-1">{a.tools.length ? a.tools.map((t) => <Chip key={t} color="#9d62ff">{TOOLS_CATALOG.find((x) => x.id === t)?.name ?? t}</Chip>) : '—'}</dd>
               <dt className="text-lab-muted">Conhecimento</dt><dd>{a.knowledge.ragEnabled ? KNOWLEDGE_BASES.find((k) => k.id === a.knowledge.ragBaseId)?.name ?? a.knowledge.ragBaseId : 'Sem RAG'} · memória {a.knowledge.memory}</dd>
-              <dt className="text-lab-muted">Tokens (30d)</dt><dd>{fmtCompact(a.stats.tokens30d)} {demo && <DemoTag />}</dd>
-              <dt className="text-lab-muted">Execuções</dt><dd>{fmtInt(a.stats.runs)} · sucesso {(a.stats.successRate * 100).toFixed(1)}% {demo && <DemoTag />}</dd>
-              <dt className="text-lab-muted">Custo (30d)</dt><dd>{fmtUsd(a.stats.costUsd30d)} <span className="text-[10px] text-lab-muted">(estimativa)</span> {demo && <DemoTag />}</dd>
+              <dt className="text-lab-muted">Tokens</dt><dd>{demo ? '—' : fmtCompact(usage.tokens)}</dd>
+              <dt className="text-lab-muted">Chamadas de modelo</dt><dd>{demo ? '—' : <>{fmtInt(usage.calls)} · {usage.errors} com erro</>}</dd>
+              <dt className="text-lab-muted">Custo registrado</dt><dd>{demo ? '—' : <>{fmtUsd(usage.costUsd)} <span className="text-[10px] text-lab-muted">(calculado pelo LiteLLM; estimativa)</span></>}</dd>
             </dl>
           </Panel>
-          <Panel accent="green" title="Status e Nível">
+          <Panel accent="green" title="Status">
             <div className="flex items-center justify-between text-[12px]">Ativo<Toggle checked={a.status === 'active'} onChange={(v) => void setAgentStatus(a.id, v ? 'active' : 'paused')} label="Ativar agente" /></div>
             <div className="mt-2 flex items-center justify-between text-[12px]">Arquivado<Toggle checked={a.status === 'archived'} onChange={(v) => void setAgentStatus(a.id, v ? 'archived' : 'paused')} label="Arquivar agente" /></div>
-            <p className="mt-3 text-[11px] text-lab-muted">Nível {a.level} · {fmtInt(a.xp)} / {fmtInt(xpNext)} XP</p>
-            <ProgressBar value={a.xp / xpNext} color="#ffb800" />
-            <p className="mt-3 text-[11px] text-lab-muted">Tokens nesta sessão: <b className="text-lab-text">{fmtInt(rt?.tokensSession ?? 0)}</b> (simulação)</p>
+            {demo && <p className="mt-3 flex items-center gap-1.5 text-[11px] text-lab-muted"><DemoTag /> Agente de exemplo (backend desconectado): não executa tarefas.</p>}
+            {rt?.step && <p className="mt-3 text-[11px] text-lab-muted">Etapa atual: <b className="text-lab-text">{rt.step}</b> ({rt.stepsDone}/{rt.stepsTotal})</p>}
           </Panel>
         </div>
       )}
@@ -90,29 +88,40 @@ export default function AgentProfilePage() {
       )}
       {tab === 'memoria' && (
         <Panel accent="cyan" title={<span className="flex items-center gap-2">Memória e contexto <PlannedBadge /></span>}>
-          <p className="text-[12px] text-lab-muted">Modo configurado: <b className="text-lab-text">{a.knowledge.memory}</b>. A inspeção de memória persistente (resumos, vetores e histórico) será implementada com o backend (Fase 4).</p>
+          <p className="text-[12px] text-lab-muted">Modo configurado: <b className="text-lab-text">{a.knowledge.memory}</b>. Hoje o agente recebe como contexto as entregas das tarefas das quais depende, as evidências do projeto e as orientações do gestor. A memória de longo prazo (resumos e vetores) está planejada.</p>
           <p className="mt-2 text-[12px]">Fontes: {a.knowledge.sources.join(', ') || '—'} · Documentos: {a.knowledge.documents.join(', ') || '—'}</p>
         </Panel>
       )}
       {tab === 'logs' && (
         <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-2">
-          <Panel accent="green" title="Execuções nesta sessão" demo>{runs.length ? <RecentRuns runs={runs} max={12} /> : <p className="text-[12px] text-lab-muted">Sem execuções registradas ainda.</p>}</Panel>
-          <Panel accent="purple" title="Eventos" demo>
+          <Panel accent="green" title="Chamadas de modelo (registradas no backend)">
+            {usage.items.length ? (
+              <div className="max-h-[300px] overflow-auto text-[11px]">
+                {usage.items.slice(0, 40).map((e) => (
+                  <p key={e.id} className="flex justify-between gap-2 border-b border-white/5 py-1">
+                    <span className={e.status === 'ok' ? 'text-neon-green' : 'text-neon-pink'}>{e.status === 'ok' ? '✓' : '✗'} {e.purpose} · {e.model}</span>
+                    <span className="text-lab-muted">{fmtInt(e.inputTokens + e.outputTokens)} tok · {fmtUsd(e.costUsd)} · {fmtClock(e.createdAt)}</span>
+                  </p>
+                ))}
+              </div>
+            ) : <p className="text-[12px] text-lab-muted">{appConfig.mode === 'real' ? 'Nenhuma chamada registrada ainda.' : 'Conecte o backend para ver o histórico real.'}</p>}
+          </Panel>
+          <Panel accent="purple" title="Eventos desta sessão">
             <div className="max-h-[300px] overflow-auto font-mono text-[11px]">{logs.length ? logs.slice().reverse().map((l) => <p key={l.id}><span className="text-lab-muted">[{fmtClock(l.ts)}]</span> {l.message}</p>) : <p className="text-lab-muted">Sem eventos.</p>}</div>
           </Panel>
         </div>
       )}
       {tab === 'avaliacao' && (
-        <Panel accent="gold" title={<span className="flex items-center gap-2">Avaliação <DemoTag /></span>}>
+        <Panel accent="gold" title="Indicadores reais">
           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-            {[['Taxa de sucesso', `${(a.stats.successRate * 100).toFixed(1)}%`], ['Latência média', `${a.stats.avgLatencySec.toFixed(1)} s`], ['Execuções (30d)', fmtInt(a.stats.runs)], ['Custo/execução', a.stats.runs ? fmtUsd(a.stats.costUsd30d / a.stats.runs) : '—']].map(([k, v]) => (
+            {[['Chamadas sem erro', usage.calls ? `${(((usage.calls - usage.errors) / usage.calls) * 100).toFixed(1)}%` : '—'], ['Latência média', usage.calls ? `${(usage.avgLatencyMs / 1000).toFixed(1)} s` : '—'], ['Chamadas', fmtInt(usage.calls)], ['Custo/chamada', usage.calls ? fmtUsd(usage.costUsd / usage.calls) : '—']].map(([k, v]) => (
               <div key={k} className="px-inset p-2 text-center"><p className="text-[10.5px] text-lab-muted">{k}</p><p className="title-pixel text-[13px]">{v}</p></div>
             ))}
           </div>
-          <p className="mt-2 text-[11px] text-lab-muted">Benchmarks comparativos reais pertencem à Fase 6 (Experiments).</p>
+          <p className="mt-2 text-[11px] text-lab-muted">Calculado a partir das execuções registradas. Benchmarks comparativos estão planejados.</p>
         </Panel>
       )}
-      <ConfirmModal open={confirm} onClose={() => setConfirm(false)} onConfirm={async () => { await deleteAgent(a.id); nav('/agentes') }} title="Excluir agente" message={<>Excluir <b>{a.name}</b> definitivamente do armazenamento local?</>} confirmLabel="Excluir" />
+      <ConfirmModal open={confirm} onClose={() => setConfirm(false)} onConfirm={async () => { await deleteAgent(a.id); nav('/agentes') }} title="Excluir agente" message={<>Excluir <b>{a.name}</b> definitivamente?</>} confirmLabel="Excluir" />
     </div>
   )
 }

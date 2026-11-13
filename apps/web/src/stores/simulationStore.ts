@@ -3,21 +3,18 @@ import type { AgentRuntime, AgentRuntimeState, ExecutionRun, LogEntry, Simulatio
 
 /**
  * Estado de execução CENTRALIZADO. A sala Phaser e os painéis React leem daqui.
- * Só muda via `ingest(evento)` — no modo real os eventos vêm do backend (SSE),
- * no modo demo vêm do DemoSimulator. Os personagens nunca definem o próprio estado.
+ * Só muda via `ingest(evento)` com eventos REAIS do backend (SSE).
+ * Os personagens nunca definem o próprio estado.
  */
 interface SimState {
-  /** autopiloto de missões demonstrativas (não afeta missões atribuídas pelo usuário) */
-  running: boolean
   runtime: Record<string, AgentRuntime>
   sessionRuns: ExecutionRun[]
   logs: LogEntry[]
   selectedAgentId: string | null
-  manualPaused: Record<string, boolean>
   ingest: (e: SimulationEvent) => void
+  setStep: (agentId: string, step: string, done: number, total: number) => void
   select: (id: string | null) => void
-  setRunning: (v: boolean) => void
-  togglePause: (agentId: string) => void
+  reset: () => void
   ensure: (agentIds: string[]) => void
 }
 
@@ -26,12 +23,10 @@ const blank = (agentId: string, state: AgentRuntimeState = 'idle'): AgentRuntime
 })
 
 export const useSimulationStore = create<SimState>((set, get) => ({
-  running: true,
   runtime: {},
   sessionRuns: [],
   logs: [],
   selectedAgentId: null,
-  manualPaused: {},
   ensure(agentIds) {
     const rt = { ...get().runtime }
     let changed = false
@@ -65,7 +60,7 @@ export const useSimulationStore = create<SimState>((set, get) => ({
         const prev = rt[e.agentId] ?? blank(e.agentId)
         rt[e.agentId] = { ...prev, progress: e.status === 'done' ? 1 : prev.progress }
         const run: ExecutionRun = {
-          id: e.taskId, agentId: e.agentId, title: prev.taskTitle ?? 'Tarefa', project: 'Simulação', status: e.status === 'done' ? 'ok' : 'error',
+          id: e.taskId, agentId: e.agentId, title: prev.taskTitle ?? 'Tarefa', project: 'Projeto', status: e.status === 'done' ? 'ok' : 'error',
           startedAt: new Date(new Date(e.ts).getTime() - e.durationMs).toISOString(), durationMs: e.durationMs, tokens: e.tokens, costUsd: e.costUsd,
           provider: 'gemini', model: '—', origin: e.origin,
         }
@@ -77,10 +72,10 @@ export const useSimulationStore = create<SimState>((set, get) => ({
         break
     }
   },
-  select: (id) => set({ selectedAgentId: id }),
-  setRunning: (v) => set({ running: v }),
-  togglePause(agentId) {
-    const mp = { ...get().manualPaused, [agentId]: !get().manualPaused[agentId] }
-    set({ manualPaused: mp })
+  setStep(agentId, step, done, total) {
+    const prev = get().runtime[agentId] ?? blank(agentId)
+    set({ runtime: { ...get().runtime, [agentId]: { ...prev, step, stepsDone: done, stepsTotal: total } } })
   },
+  select: (id) => set({ selectedAgentId: id }),
+  reset: () => set({ runtime: {}, sessionRuns: [], logs: [] }),
 }))

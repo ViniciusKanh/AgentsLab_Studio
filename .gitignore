@@ -25,3 +25,6 @@ Thumbs.db
 apps/api/data/
 docs/media/*.webm
 docs/media/.video-tmp/
+apps/api/tests/.data/
+*.db
+secrets.enc

@@ -8,7 +8,6 @@ import '@xyflow/react/dist/style.css'
 import { AlertTriangle, CheckCircle2, Copy, FilePlus2, Play, Save, ShieldCheck, Square, Trash2, Workflow as WorkflowIcon } from 'lucide-react'
 import type { Workflow, WorkflowEdge, WorkflowNode, WorkflowNodeKind } from '@/types/domain'
 import { useLabStore } from '@/stores/labStore'
-import { useGameStore } from '@/stores/gameStore'
 import { useUiStore } from '@/stores/uiStore'
 import { Avatar, DemoTag, Field, Panel, cx } from '@/components/ui/primitives'
 import { ConfirmModal } from '@/components/ui/Modal'
@@ -46,7 +45,6 @@ export default function WorkflowStudioPage() {
 function Studio() {
   const { workflows, saveWorkflow, deleteWorkflow, loaded } = useLabStore()
   const agents = useLabStore((s) => s.agents)
-  const record = useGameStore((s) => s.record)
   const toast = useUiStore((s) => s.toast)
   const [params, setParams] = useSearchParams()
   const [current, setCurrent] = useState<Workflow | null>(null)
@@ -154,10 +152,9 @@ function Studio() {
     })
     runTimers.current.push(setTimeout(() => {
       setRunning(false)
-      record('workflowRun')
-      toast(`Simulação concluída: ${plan.length} etapas percorridas (demo, sem chamadas a LLM)`, 'success')
+      toast(`Ordem validada: ${plan.length} etapas. Pré-visualização — a execução de fluxos personalizados está planejada; projetos usam o planejamento do coordenador.`, 'info')
     }, plan.length * 1100 + 200))
-  }, [nodes, edges, record, setNodes, toast])
+  }, [nodes, edges, setNodes, toast])
 
   useEffect(() => {
     if (params.get('executar') && current && nodes.length && !running) { setParams({}, { replace: true }); run() }
@@ -211,9 +208,9 @@ function Studio() {
               {running ? (
                 <button className="px-btn sm" style={{ ['--c' as string]: '#ff537a' }} onClick={stopRun}><Square size={13} /> Parar</button>
               ) : (
-                <button className="px-btn sm solid" onClick={run} data-testid="run-workflow"><Play size={13} /> Executar simulação</button>
+                <button className="px-btn sm solid" onClick={run} data-testid="run-workflow"><Play size={13} /> Pré-visualizar ordem</button>
               )}
-              <DemoTag label="SIMULAÇÃO DEMO" />
+              <DemoTag label="PRÉ-VISUALIZAÇÃO" />
             </div>
           </div>
           <div ref={wrapper} className="relative min-h-0 flex-1 overflow-hidden rounded-[4px] bg-[#070c1c]" onDrop={onDrop} onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}>

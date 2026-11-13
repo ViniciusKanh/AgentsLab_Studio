@@ -2,8 +2,21 @@ import { appConfig } from './config'
 import type { LabDataSource } from './dataSource'
 import { createDemoDataSource } from './demo/demoDataSource'
 import { createApiDataSource } from './api/apiDataSource'
+import { apiBase } from './backend'
 
-/** Fonte de dados ativa — trocada apenas por VITE_APP_MODE, sem alterar as páginas. */
-export const dataSource: LabDataSource = appConfig.mode === 'real' ? createApiDataSource(appConfig.apiBaseUrl) : createDemoDataSource()
+const demo = createDemoDataSource()
+const real = createApiDataSource(apiBase)
+
+/**
+ * Fonte de dados ativa, decidida em tempo de execução:
+ * backend conectado → API real; sem backend → exemplos locais (somente visualização).
+ */
+export const dataSource: LabDataSource = new Proxy({} as LabDataSource, {
+  get(_t, prop) {
+    const ds = appConfig.mode === 'real' ? real : demo
+    const v = ds[prop as keyof LabDataSource]
+    return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(ds) : v
+  },
+})
 
 export { appConfig }

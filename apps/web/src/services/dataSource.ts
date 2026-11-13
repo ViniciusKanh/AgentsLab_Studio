@@ -1,5 +1,5 @@
 import type {
-  Agent, AgentDraft, CredentialProfile, DashboardData, DashboardPeriod, EnvironmentInfo, ExecutionRun, KnowledgeBase, LogEntry, Provider, Workflow,
+  Agent, AgentDraft, CredentialProfile, EnvironmentInfo, ExecutionRun, KnowledgeBase, LogEntry, Provider, Workflow,
 } from '@/types/domain'
 
 /**
@@ -8,8 +8,6 @@ import type {
  */
 export interface LabDataSource {
   readonly kind: 'demo' | 'real'
-  getDashboard(period: DashboardPeriod): Promise<DashboardData>
-
   listAgents(): Promise<Agent[]>
   saveAgent(draft: AgentDraft): Promise<Agent>
   duplicateAgent(id: string): Promise<Agent>
@@ -38,7 +36,7 @@ export interface LabDataSource {
 
 export class NotAvailableError extends Error {
   constructor(feature: string) {
-    super(`${feature} ainda não está disponível no modo real (planejado para a Fase 2).`)
+    super(`${feature} não está disponível nesta versão.`)
     this.name = 'NotAvailableError'
   }
 }

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { Bot, Plus, Search } from 'lucide-react'
 import { useLabStore } from '@/stores/labStore'
 import { Panel, Tabs } from '@/components/ui/primitives'
-import { AgentMiniCard } from '@/features/dashboard/widgets'
+import { AgentMiniCard } from '@/features/agents/widgets'
 
 type F = 'all' | 'active' | 'paused' | 'archived'
 

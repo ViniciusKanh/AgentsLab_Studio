@@ -59,10 +59,10 @@ export function Panel({ title, icon, accent = 'purple', actions, demo, className
       {title !== undefined && (
         <header className="flex items-center gap-2 border-b border-white/5 px-3 pb-1.5 pt-2">
           {icon && <span className="flex items-center" style={{ color: ACCENT_HEX[accent] }}>{icon}</span>}
-          <h2 className="truncate text-[13px] font-extrabold tracking-wide text-lab-text">{title}</h2>
+          <h2 className="min-w-0 truncate text-[13px] font-extrabold tracking-wide text-lab-text">{title}</h2>
           {stripes && <span className="ml-1 hidden h-2 flex-1 bg-[repeating-linear-gradient(-60deg,rgb(255_255_255/0.25)_0_2px,transparent_2px_6px)] opacity-60 md:block" />}
           {demo && <DemoTag className={stripes ? '' : 'ml-1'} />}
-          <div className={cx('flex items-center gap-2', !stripes && 'ml-auto')}>{actions}</div>
+          <div className={cx('flex shrink-0 items-center gap-2', !stripes && 'ml-auto')}>{actions}</div>
         </header>
       )}
       <div className={cx('min-h-0 flex-1 p-3', bodyClassName)}>{children}</div>

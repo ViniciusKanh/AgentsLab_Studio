@@ -1,18 +1,18 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Briefcase, Eye, EyeOff, LayoutPanelLeft, Maximize, Minus, Pause, Play, Plus, Tag, UserPlus, X, FastForward } from 'lucide-react'
+import { Eye, FolderPlus, EyeOff, LayoutPanelLeft, Maximize, Minus, Pause, Play, Plus, Tag, UserPlus, X, FastForward } from 'lucide-react'
 import { WorldCanvas } from '@/world/render/WorldCanvas'
 import { worldBus } from '@/world/events/bus'
 import { envPath, getWorldMap } from '@/world/maps'
 import { useWorldStore } from '@/stores/worldStore'
 import { useSimulationStore } from '@/stores/simulationStore'
 import { useLabStore } from '@/stores/labStore'
-import { useGameStore } from '@/stores/gameStore'
 import { cx } from '@/components/ui/primitives'
 import { AgentContextPanel } from './AgentContextPanel'
 import { EventFeed } from './EventFeed'
 import { ManagementPanel } from './ManagementPanel'
-import { MissionModal } from './MissionModal'
+import { AssignTaskModal } from './AssignTaskModal'
+import { OverviewHud } from './OverviewHud'
 import { ObjectCard } from './ObjectCard'
 
 const ENVS = ['office', 'research'] as const
@@ -30,13 +30,11 @@ export default function WorldPage({ envId: fixedEnv }: { envId?: string }) {
   const select = useSimulationStore((s) => s.select)
   const agents = useLabStore((s) => s.agents)
   const selected = agents.find((a) => a.id === selectedId && (a.environmentId === envId || (envId === 'office' && !['office', 'research'].includes(a.environmentId)))) ?? null
-  const record = useGameStore((s) => s.record)
-  const [missionFor, setMissionFor] = useState<string[] | null>(null)
+  const [assignFor, setAssignFor] = useState<string | null>(null)
 
   useEffect(() => {
     setLastEnv(envId)
-    record('environmentVisited', { envId })
-  }, [envId, setLastEnv, record])
+  }, [envId, setLastEnv])
 
   // Esc sai do modo observador / fecha seleção
   useEffect(() => {
@@ -93,19 +91,20 @@ export default function WorldPage({ envId: fixedEnv }: { envId?: string }) {
           {!observer && (
             <div className="absolute right-3 top-3 flex gap-1.5">
               <button className="px-btn sm ghost bg-[#070b17]/85" onClick={() => nav(`/agentes/novo?ambiente=${envId}`)}><UserPlus size={13} /> Novo agente</button>
-              <button className="px-btn sm solid" onClick={() => setMissionFor([])} data-testid="new-mission"><Briefcase size={13} /> Nova missão</button>
+              <button className="px-btn sm solid" onClick={() => nav('/projetos?novo=1')} data-testid="new-project"><FolderPlus size={13} /> Novo projeto</button>
             </div>
           )}
 
-          {management && !observer && <ManagementPanel envId={envId} onMission={(ids) => setMissionFor(ids)} />}
+          {management && !observer && <ManagementPanel envId={envId} onAssign={(id) => setAssignFor(id)} />}
+          {!observer && !management && <OverviewHud />}
           {!observer && <ObjectCard />}
         </div>
         {!observer && <EventFeed />}
       </div>
       {selected && !observer && (
-        <AgentContextPanel agent={selected} onClose={() => select(null)} onMission={() => setMissionFor([selected.id])} />
+        <AgentContextPanel agent={selected} onClose={() => select(null)} onAssign={() => setAssignFor(selected.id)} />
       )}
-      {missionFor && <MissionModal envId={envId} preselected={missionFor} onClose={() => setMissionFor(null)} />}
+      {assignFor && <AssignTaskModal agentId={assignFor} onClose={() => setAssignFor(null)} />}
       {observer && <button className="sr-only" onClick={() => setObserver(false)}><X /> sair</button>}
     </div>
   )

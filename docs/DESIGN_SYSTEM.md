@@ -11,14 +11,14 @@ Pixel art 16 bits + RPG de gerenciamento + cyberpunk retrô. Referências: 5 ima
 | `neon-green` | `#00F5A0` | ação primária, sucesso, ativo |
 | `neon-purple` | `#9D62FF` | bordas principais, colaboração |
 | `neon-cyan` | `#39D6FF` | informação, planejamento |
-| `neon-gold` | `#FFB800` | gamificação, revisão, DEMO |
+| `neon-gold` | `#FFB800` | aprovações pendentes, revisão, OFFLINE |
 | `neon-pink` | `#FF537A` | erro, latência, exclusão |
 
 Tipografia: **Press Start 2P** (`title-pixel`) para títulos e valores; **JetBrains Mono** para todo o resto. Fontes servidas localmente via `@fontsource`.
 
 ## Componentes (`src/components`)
 - `px-panel` + `c-{accent}`: painel com borda neon, brilho interno e cantos pixelados. Componente React `Panel` (título, ícone, ações, selo DEMO, faixas).
-- `px-btn` (`solid`, `ghost`, `sm`), `px-input`, `px-label`, `px-chip`, `px-bar` (barra segmentada HP/XP), `px-inset`.
+- `px-btn` (`solid`, `ghost`, `sm`), `px-input`, `px-label`, `px-chip`, `px-bar` (barra segmentada de etapas), `px-inset`.
 - `StatCard` (KPI), `Avatar` (retrato pixel), `PixelIcon`, `Toggle`, `Tabs`, `Field`, `Chip`, `ProgressBar`, `Modal`/`ConfirmModal`, `Toaster`, `DemoTag`, `PlannedBadge`.
 - Layout: `ProfileCard`, `Sidebar`, `TopBar` (cena panorâmica + logotipo + contadores), `StatusBar`.
 

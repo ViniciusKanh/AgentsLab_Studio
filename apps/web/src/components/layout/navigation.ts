@@ -1,4 +1,4 @@
-import { Bot, Building2, Database, FlaskConical, FolderKanban, Gauge, Home, LayoutDashboard, ScrollText, Settings, Sparkles, Trophy, Workflow, Cpu } from 'lucide-react'
+import { Bot, Building2, Cpu, FileText, FolderKanban, Home, Map, ScrollText, Settings, Workflow } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 export interface NavItem {
@@ -9,24 +9,16 @@ export interface NavItem {
   end?: boolean
 }
 
-/** Navegação principal (Environment First). */
+/** Navegação principal da plataforma de organizações multiagentes. */
 export const NAV_MAIN: NavItem[] = [
-  { to: '/', label: 'Início', icon: Home, end: true },
-  { to: '/escritorio', label: 'Escritório', icon: Building2 },
-  { to: '/laboratorio', label: 'Laboratório', icon: FlaskConical },
+  { to: '/', label: 'Visão Geral', icon: Home, end: true },
+  { to: '/organizacoes', label: 'Organizações', icon: Building2 },
+  { to: '/ambientes', label: 'Ambientes', icon: Map },
   { to: '/agentes', label: 'Agentes', icon: Bot },
-  { to: '/projetos', label: 'Projetos', icon: FolderKanban, planned: true },
-  { to: '/workflows', label: 'Workflows', icon: Workflow },
-  { to: '/experimentos', label: 'Experimentos', icon: Sparkles, planned: true },
-  { to: '/modelos', label: 'Modelos', icon: Cpu },
-  { to: '/configuracoes', label: 'Configurações', icon: Settings },
-]
-
-/** Ferramentas de apoio (o painel de métricas deixou de ser a tela principal). */
-export const NAV_MORE: NavItem[] = [
-  { to: '/painel', label: 'Painel de métricas', icon: LayoutDashboard },
-  { to: '/ambientes', label: 'Ambientes', icon: Gauge },
-  { to: '/conhecimento', label: 'Conhecimento', icon: Database },
+  { to: '/projetos', label: 'Projetos', icon: FolderKanban },
+  { to: '/fluxos', label: 'Tarefas e Fluxos', icon: Workflow },
+  { to: '/documentos', label: 'Documentos', icon: FileText },
   { to: '/execucoes', label: 'Execuções', icon: ScrollText },
-  { to: '/gamificacao', label: 'Missões & Conquistas', icon: Trophy },
+  { to: '/provedores', label: 'Provedores e Custos', icon: Cpu },
+  { to: '/configuracoes', label: 'Configurações', icon: Settings },
 ]
