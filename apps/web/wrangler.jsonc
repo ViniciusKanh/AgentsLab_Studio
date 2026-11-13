@@ -1,0 +1,12 @@
+// Publicação do frontend no Cloudflare Workers (arquivos estáticos do Vite).
+// Workers Builds: diretório raiz apps/web · build "npm run build" · deploy "npx wrangler deploy".
+// As variáveis VITE_* são lidas NO BUILD (Cloudflare → Settings → Build → Variables).
+{
+  "name": "agentslab-studio",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "./dist",
+    // SPA: rotas como /projetos/123 devolvem o index.html
+    "not_found_handling": "single-page-application"
+  }
+}
