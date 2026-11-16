@@ -38,6 +38,17 @@ AGENTSLAB_CORS_ORIGIN_REGEX=https://.*\.vercel\.app|https://.*\.agentslab-studio
   - Republica sozinho a cada push que altera `apps/api/` (`buildFilter`). Memória medida: ~230 MB com LiteLLM carregado (limite gratuito: 512 MB).
 - **Hugging Face Space**: Space Docker com o conteúdo de `apps/api`, variável `PORT=7860`, segredos em *Settings → Variables and secrets*. Use Space **privado** só se o frontend não precisar acessá-lo diretamente; com login Supabase, o Space público é seguro (todas as rotas exigem JWT).
 - **Fly.io/Railway**: `fly launch` / *Deploy from repo* apontando para `apps/api`.
+- **Imagem Docker publicada (GHCR) — alternativa oficial**: a mesma imagem usada no Render é publicada em `ghcr.io/viniciuskanh/agentslab-api` pelo workflow [`docker-publish.yml`](../.github/workflows/docker-publish.yml). Use-a em qualquer host que rode containers (VPS própria, outro PaaS, ou localmente com `compose.ghcr.yml`) sem precisar construir a imagem:
+  ```bash
+  docker pull ghcr.io/viniciuskanh/agentslab-api:latest
+  docker run -d --name agentslab-api -p 8000:8000 \
+    -e AGENTSLAB_DATABASE_URL="postgresql+psycopg://postgres.<ref>:<senha>@aws-0-sa-east-1.pooler.supabase.com:5432/postgres?sslmode=require" \
+    -e AGENTSLAB_MASTER_KEY="<sua-chave-fernet>" \
+    -e AGENTSLAB_SUPABASE_URL="https://<ref>.supabase.co" \
+    -e AGENTSLAB_CORS_ORIGINS="https://seu-frontend.exemplo" \
+    ghcr.io/viniciuskanh/agentslab-api:latest
+  ```
+  Tags, variáveis, verificação de saúde, logs e atualização de versão: ver seção *"17. Docker & GitHub Packages"* do [README](../README.md#17-docker--github-packages). Isso **não substitui** o Render/HF/Fly — é só mais um caminho de distribuição da mesma imagem, útil quando o host já roda Docker diretamente.
 
 Depois do primeiro deploy (tabelas criadas), rode `supabase/migrations/20261113000002_agentslab_security.sql`.
 

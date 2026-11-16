@@ -35,6 +35,7 @@
 14. [Análise do projeto](#14-análise-do-projeto)
 15. [Solução de problemas](#15-solução-de-problemas)
 16. [Documentação complementar](#16-documentação-complementar)
+17. [Docker & GitHub Packages](#17-docker--github-packages)
 
 ---
 
@@ -484,6 +485,143 @@ Texto completo de artigos (PDF) · upload de documentos e RAG (pgvector) · exec
 ## 16. Documentação complementar
 
 [Arquitetura](docs/ARCHITECTURE.md) · [Validação da execução multiagente](docs/VALIDACAO_EXECUCAO.md) · [Supabase](docs/SUPABASE.md) · [Publicação](docs/DEPLOY.md) · [Roadmap e decisões](docs/ROADMAP.md) · [Modelo de agentes](docs/AGENT_MODEL.md) · [Design System](docs/DESIGN_SYSTEM.md) · [Telas](docs/SCREENS.md) · [Plano de adaptação](docs/PLANO_ADAPTACAO.md) · [Regras do projeto (CLAUDE.md)](CLAUDE.md)
+
+## 17. Docker & GitHub Packages
+
+[![Docker Publish](https://github.com/ViniciusKanh/AgentsLab_Studio/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/ViniciusKanh/AgentsLab_Studio/actions/workflows/docker-publish.yml)
+
+O **backend** (`apps/api`) também é distribuído como imagem Docker oficial, publicada automaticamente no **GitHub Container Registry (GHCR)** a partir do mesmo `apps/api/Dockerfile` usado em produção (Render). Este pacote distribui **somente a API**; ele não substitui nem inclui o frontend React/TypeScript (`apps/web`), que continua publicado separadamente (Cloudflare Workers/Pages ou Vercel — seção 9).
+
+**Imagem:** `ghcr.io/viniciuskanh/agentslab-api` · **Pacote:** [github.com/ViniciusKanh/AgentsLab_Studio/pkgs/container/agentslab-api](https://github.com/ViniciusKanh/AgentsLab_Studio/pkgs/container/agentslab-api) · **Código-fonte:** [github.com/ViniciusKanh/AgentsLab_Studio](https://github.com/ViniciusKanh/AgentsLab_Studio)
+
+### Tags disponíveis
+
+Geradas por [`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml):
+
+| Tag | Origem | Estabilidade |
+|---|---|---|
+| `vMAJOR.MINOR.PATCH`, `MAJOR.MINOR`, `MAJOR` | push de uma tag Git `vX.Y.Z` | Release estável |
+| `latest` | a release estável mais recente | Estável (nunca um build de pull request) |
+| `edge` | último build validado da branch `main` | Pode conter mudanças ainda não lançadas |
+| `sha-<commit>` | qualquer build validado | Imutável, rastreável a um commit exato |
+
+> Nenhuma release estável foi publicada ainda — a primeira publicação do pacote depende de autorização explícita do mantenedor (ver [pendências](#i-pendências) no relatório de implementação). Até lá, `latest`/`edge` podem não existir no registro.
+
+### Requisitos
+
+- Docker Engine 24+ ou Docker Desktop (com suporte a BuildKit/Buildx para quem for compilar a imagem localmente).
+- PostgreSQL acessível — Supabase ou um container (veja [Integração com PostgreSQL](#integração-com-postgresql-1) abaixo). A API recusa iniciar sem `AGENTSLAB_DATABASE_URL`.
+- Uma `AGENTSLAB_MASTER_KEY` (Fernet): gere **uma vez** com `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` e guarde-a — perdê-la invalida as chaves de API já salvas no banco.
+
+### Baixar a imagem
+
+```bash
+docker pull ghcr.io/viniciuskanh/agentslab-api:latest
+```
+
+Uma versão específica: `docker pull ghcr.io/viniciuskanh/agentslab-api:v1.0.0` (ajuste à versão publicada). Para fixar por digest (reprodutibilidade máxima em produção): `docker pull ghcr.io/viniciuskanh/agentslab-api@sha256:<digest>`.
+
+### Executar com Docker
+
+```bash
+docker run -d --name agentslab-api \
+  -p 8000:8000 \
+  -e AGENTSLAB_DATABASE_URL="postgresql+psycopg://postgres.<ref>:<senha>@aws-0-sa-east-1.pooler.supabase.com:5432/postgres?sslmode=require" \
+  -e AGENTSLAB_MASTER_KEY="<sua-chave-fernet>" \
+  -e AGENTSLAB_SUPABASE_URL="https://<ref>.supabase.co" \
+  -e AGENTSLAB_CORS_ORIGINS="https://seu-frontend.exemplo" \
+  ghcr.io/viniciuskanh/agentslab-api:latest
+```
+
+### Executar com Docker Compose
+
+Desenvolvimento local, construindo a imagem a partir do código (já documentado na seção 6): `docker compose up -d`.
+
+Sem construir localmente — usando a imagem publicada no GHCR — use o arquivo complementar [`compose.ghcr.yml`](compose.ghcr.yml):
+
+```bash
+# ghcr.env contém as mesmas variáveis de apps/api/.env.example (NUNCA versione esse arquivo)
+docker compose -f compose.ghcr.yml --env-file ghcr.env up -d
+
+# escolher outra tag sem editar nada:
+AGENTSLAB_IMAGE_TAG=v1.0.0 docker compose -f compose.ghcr.yml --env-file ghcr.env up -d
+```
+
+Esse arquivo sobe PostgreSQL (com volume próprio) + a API publicada, sem reconstruir o backend localmente. Não execute os dois arquivos de compose ao mesmo tempo no mesmo host (ambos usam a porta 8000 por padrão).
+
+### Variáveis de ambiente
+
+A imagem lê as mesmas variáveis documentadas na seção 7 e em [`apps/api/.env.example`](apps/api/.env.example). As obrigatórias para rodar o container:
+
+| Variável | Obrigatória | Descrição |
+|---|---|---|
+| `AGENTSLAB_DATABASE_URL` | Sim | PostgreSQL (Supabase ou container) |
+| `AGENTSLAB_MASTER_KEY` | Sim (com `AGENTSLAB_SECRET_BACKEND=db`, padrão) | Chave Fernet para o cofre de credenciais no banco |
+| `AGENTSLAB_SUPABASE_URL` | Para autenticação multiusuário | Vazio = modo local de usuário único |
+| `AGENTSLAB_CORS_ORIGINS` | Para o frontend acessar a API | Lista separada por vírgulas |
+| `PORT` | Não (padrão `8000`) | Porta do Uvicorn dentro do container (HF Spaces usa `7860`) |
+
+### Integração com PostgreSQL
+
+A API nunca usa SQLite fora dos testes automatizados. Em produção, aponte `AGENTSLAB_DATABASE_URL` para o PostgreSQL do Supabase (connection pooler, porta 5432) ou para um container PostgreSQL próprio — o `compose.ghcr.yml` já sobe um com volume persistente (`agentslab-pg-ghcr`).
+
+### Integração com Supabase
+
+Defina `AGENTSLAB_SUPABASE_URL` (e, só em projetos com JWT legado HS256, `AGENTSLAB_SUPABASE_JWT_SECRET`) para habilitar contas reais. Vazio = modo local de usuário único (sem login), útil para testes rápidos do pacote. Veja [docs/SUPABASE.md](docs/SUPABASE.md).
+
+### Verificação de saúde
+
+```bash
+curl http://localhost:8000/health
+# {"status":"ok","service":"agentslab-api","version":"0.4.0","auth":"supabase"}
+```
+
+A imagem também define um `HEALTHCHECK` nativo do Docker (`docker ps` mostra `healthy`/`unhealthy`), consultando o mesmo endpoint a cada 30 s.
+
+### Logs e diagnóstico
+
+```bash
+docker logs -f agentslab-api          # Docker run
+docker compose -f compose.ghcr.yml logs -f api   # Compose
+```
+
+### Persistência dos dados
+
+O container é **stateless**: todos os dados (organizações, agentes, projetos, execuções, documentos, credenciais) ficam no PostgreSQL externo, nunca no filesystem da imagem. `AGENTSLAB_DATA_DIR=/tmp/agentslab` é efêmero e é descartado ao remover o container.
+
+### Versionamento
+
+A imagem segue [SemVer](https://semver.org/lang/pt-BR/) a partir de tags Git `vMAJOR.MINOR.PATCH` no repositório — independente da versão interna da API retornada por `/health` (atualmente `0.4.0`) e da versão geral do produto (README, atualmente v1.4). Builds de commits individuais ficam disponíveis pela tag `sha-<commit>`.
+
+### Segurança
+
+Processo roda com usuário não privilegiado (UID fixo, sem shell de login); nenhum segredo, `.env` ou chave é incorporado à imagem (veja [`apps/api/.dockerignore`](apps/api/.dockerignore)); dependências fixadas por `requirements.lock.txt`; publicação gera *provenance* e SBOM via BuildKit; o workflow usa apenas o `GITHUB_TOKEN` padrão do GitHub Actions, com permissões mínimas (`contents: read`, `packages: write`), e nunca publica a partir de pull requests.
+
+### Atualização para uma versão mais recente
+
+```bash
+# Docker run
+docker pull ghcr.io/viniciuskanh/agentslab-api:latest
+docker stop agentslab-api && docker rm agentslab-api
+docker run -d --name agentslab-api -p 8000:8000 --env-file ghcr.env ghcr.io/viniciuskanh/agentslab-api:latest
+
+# Docker Compose
+docker compose -f compose.ghcr.yml pull
+docker compose -f compose.ghcr.yml up -d
+```
+
+O PostgreSQL (schema `agentslab`) recebe colunas novas automaticamente na inicialização (`main.migrate()`), sem perder dados — mesmo comportamento de qualquer outro deploy (seção 12).
+
+### Solução de problemas frequentes
+
+| Sintoma | Causa provável | Solução |
+|---|---|---|
+| Container reinicia sozinho / `ConfigError: Banco não configurado` | `AGENTSLAB_DATABASE_URL` ausente ou inválida | Defina a variável (Supabase ou `compose.ghcr.yml`) |
+| `401`/chaves de API não abrem mais | `AGENTSLAB_MASTER_KEY` diferente da usada quando as chaves foram salvas | Use sempre a mesma master key do ambiente original |
+| `/health` não responde | Porta divergente (`PORT` vs. mapeamento `-p`) | Confirme `-p <host>:${PORT:-8000}` |
+| CORS bloqueado no navegador | `AGENTSLAB_CORS_ORIGINS` sem o domínio do frontend | Ajuste a variável e reinicie o container |
+| `docker pull` retorna 401/403 | Pacote ainda privado ou tag inexistente | Confirme a visibilidade do pacote no GitHub e a tag publicada |
+
 
 ---
 

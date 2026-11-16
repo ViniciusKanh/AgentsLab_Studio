@@ -1,0 +1,47 @@
+# Alternativa ao docker-compose.yml: em vez de construir a imagem da API localmente
+# (`build: ./apps/api`), consome a imagem já publicada no GitHub Container Registry.
+# Não altera nem substitui o docker-compose.yml de desenvolvimento — é um arquivo à parte.
+#
+# Uso:
+#   1) crie um arquivo de variáveis (ex.: ghcr.env) com AGENTSLAB_MASTER_KEY, AGENTSLAB_SUPABASE_URL
+#      etc. (veja apps/api/.env.example) — NUNCA versione esse arquivo.
+#   2) suba o ambiente:
+#        docker compose -f compose.ghcr.yml --env-file ghcr.env up -d
+#      (opcional) escolha a tag da imagem:
+#        AGENTSLAB_IMAGE_TAG=v1.0.0 docker compose -f compose.ghcr.yml --env-file ghcr.env up -d
+#   3) atualizar para uma versão mais nova (sem build local):
+#        docker compose -f compose.ghcr.yml pull && docker compose -f compose.ghcr.yml up -d
+#
+# Este arquivo não deve ser usado simultaneamente com docker-compose.yml no mesmo host
+# (mesma porta 8000) — pare um ambiente antes de subir o outro.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${AGENTSLAB_PG_USER:-agentslab}
+      POSTGRES_PASSWORD: ${AGENTSLAB_PG_PASSWORD:-agentslab}
+      POSTGRES_DB: ${AGENTSLAB_PG_DB:-agentslab}
+    # Não publique esta porta num host exposto à internet; mantenha-a interna à rede do compose
+    # (remova/comente em produção se não precisar acessar o banco a partir do host).
+    ports: ["${AGENTSLAB_PG_PORT:-5432}:5432"]
+    volumes: [agentslab-pg-ghcr:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${AGENTSLAB_PG_USER:-agentslab}"]
+      interval: 5s
+      retries: 10
+  api:
+    image: ${AGENTSLAB_IMAGE:-ghcr.io/viniciuskanh/agentslab-api}:${AGENTSLAB_IMAGE_TAG:-latest}
+    environment:
+      AGENTSLAB_ENV: ${AGENTSLAB_ENV:-production}
+      AGENTSLAB_DATABASE_URL: postgresql+psycopg://${AGENTSLAB_PG_USER:-agentslab}:${AGENTSLAB_PG_PASSWORD:-agentslab}@db:5432/${AGENTSLAB_PG_DB:-agentslab}
+      AGENTSLAB_SECRET_BACKEND: ${AGENTSLAB_SECRET_BACKEND:-db}
+      AGENTSLAB_MASTER_KEY: ${AGENTSLAB_MASTER_KEY:?defina AGENTSLAB_MASTER_KEY no --env-file (veja apps/api/.env.example)}
+      AGENTSLAB_SUPABASE_URL: ${AGENTSLAB_SUPABASE_URL:-}
+      AGENTSLAB_SUPABASE_JWT_SECRET: ${AGENTSLAB_SUPABASE_JWT_SECRET:-}
+      AGENTSLAB_CORS_ORIGINS: ${AGENTSLAB_CORS_ORIGINS:-http://localhost:5173,http://localhost:4173}
+      AGENTSLAB_CORS_ORIGIN_REGEX: ${AGENTSLAB_CORS_ORIGIN_REGEX:-}
+    ports: ["${AGENTSLAB_API_PORT:-8000}:8000"]
+    depends_on:
+      db: { condition: service_healthy }
+volumes:
+  agentslab-pg-ghcr:

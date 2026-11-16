@@ -1,0 +1,224 @@
+# Publica a imagem Docker da API (apps/api) no GitHub Container Registry (GHCR).
+#
+# Imagem: ghcr.io/viniciuskanh/agentslab-api
+#
+# Este workflow COMPLEMENTA ci.yml (testes da aplicação) e release.yml (artefatos da release
+# no GitHub Releases); não os substitui. Fluxo:
+#   1) pytest da API (mesma suíte do ci.yml, para garantir que a imagem só é construída
+#      sobre um backend validado).
+#   2) build da imagem Docker (sem publicar) a partir de apps/api/Dockerfile.
+#   3) smoke test real do container: PostgreSQL efêmero (serviço do job) + chave Fernet
+#      temporária, validando GET /health (status/serviço/versão) e ausência de erros
+#      críticos no log.
+#   4) publicação no GHCR — SOMENTE quando os passos acima forem aprovados e o evento for
+#      autorizado (push em main → tag "edge"; push de tag vX.Y.Z → tags semver + "latest").
+#      Pull requests (inclusive de forks) nunca publicam.
+name: Docker Publish (GHCR)
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      publicar_edge:
+        description: "Publicar manualmente a tag 'edge' a partir desta execução (normalmente a publicação é automática via push/tag)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: ghcr.io/viniciuskanh/agentslab-api
+
+jobs:
+  # Etapa A (checkout) + Etapa B (validação da API): a mesma suíte do job "api" em ci.yml.
+  test-api:
+    name: Testes da API (pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Configurar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: apps/api/requirements.lock.txt
+      - name: Instalar dependências (lock)
+        run: pip install -r requirements.txt -c requirements.lock.txt
+      - name: pytest
+        run: pytest -q
+
+  # Etapa C (build) + Etapa D (testes do container): nunca publica.
+  build:
+    name: Build da imagem + smoke test do container
+    needs: test-api
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: agentslab
+          POSTGRES_PASSWORD: agentslab
+          POSTGRES_DB: agentslab
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U agentslab"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build da imagem (local, sem publicar)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./apps/api
+          file: ./apps/api/Dockerfile
+          push: false
+          load: true
+          tags: agentslab-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Gerar chave Fernet temporária (somente para este teste)
+        id: fernet
+        run: |
+          KEY=$(python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 2>/dev/null || python3 -c "import secrets,base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())")
+          echo "::add-mask::$KEY"
+          echo "key=$KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Subir o container e validar GET /health
+        run: |
+          set -e
+          docker run -d --name agentslab-api-ci \
+            --network host \
+            -e PORT=8000 \
+            -e AGENTSLAB_ENV=test \
+            -e AGENTSLAB_SECRET_BACKEND=db \
+            -e AGENTSLAB_DATABASE_URL="postgresql+psycopg://agentslab:agentslab@127.0.0.1:5432/agentslab" \
+            -e AGENTSLAB_MASTER_KEY="${{ steps.fernet.outputs.key }}" \
+            -e AGENTSLAB_CORS_ORIGINS="http://localhost:5173" \
+            agentslab-api:ci
+
+          ok=""
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/health -o /tmp/health.json; then ok=1; break; fi
+            sleep 1
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::A API não respondeu em /health a tempo."
+            docker logs agentslab-api-ci || true
+            exit 1
+          fi
+
+          echo "--- GET /health ---"
+          cat /tmp/health.json; echo
+
+          python3 - <<'PY'
+          import json
+          with open('/tmp/health.json') as f:
+              data = json.load(f)
+          assert data.get('status') == 'ok', f"status inesperado: {data}"
+          assert data.get('service') == 'agentslab-api', f"service inesperado: {data}"
+          assert data.get('version'), f"version ausente: {data}"
+          print('Validação de /health OK:', data)
+          PY
+
+      - name: Verificar ausência de erros críticos no log do container
+        run: |
+          if docker logs agentslab-api-ci 2>&1 | grep -Ei "traceback|critical|unhandled exception"; then
+            echo "::error::Erros críticos encontrados no log do container."
+            exit 1
+          fi
+          echo "Sem erros críticos no log."
+
+      - name: Logs do container (diagnóstico)
+        if: always()
+        run: docker logs agentslab-api-ci || true
+
+      - name: Encerrar container de teste
+        if: always()
+        run: docker rm -f agentslab-api-ci || true
+
+  # Etapa E + F: publicação no GHCR com tags/metadados SemVer. Só roda quando autorizado;
+  # nunca a partir de pull_request (inclusive de forks).
+  publish:
+    name: Publicar no GHCR
+    needs: build
+    runs-on: ubuntu-latest
+    if: >-
+      github.repository == 'ViniciusKanh/AgentsLab_Studio' &&
+      github.event_name != 'pull_request' &&
+      (
+        (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+        startsWith(github.ref, 'refs/tags/v') ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.publicar_edge == 'true')
+      )
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login no GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tags SemVer só quando o evento é um push de tag vX.Y.Z; push em main gera "edge";
+      # "latest" só é marcada em releases estáveis (tag), nunca em push comum de main.
+      - name: Metadados e tags (SemVer)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,prefix=sha-,format=short
+          labels: |
+            org.opencontainers.image.title=AgentsLab_Studio API
+            org.opencontainers.image.description=Backend FastAPI do AgentsLab_Studio: orquestracao de organizacoes virtuais multiagentes de IA.
+            org.opencontainers.image.vendor=ViniciusKanh
+
+      - name: Build e push para o GHCR
+        uses: docker/build-push-action@v6
+        with:
+          context: ./apps/api
+          file: ./apps/api/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Resumo da publicação
+        run: |
+          echo "### Imagem publicada no GHCR" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.meta.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

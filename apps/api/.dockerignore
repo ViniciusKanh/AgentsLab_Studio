@@ -1,7 +1,43 @@
+# Ambientes virtuais e caches
 .venv
-data
-tests
+venv
 __pycache__
+*.py[cod]
 .pytest_cache
-*.db
+.mypy_cache
+.ruff_cache
+
+# Segredos e variáveis de ambiente — nunca no contexto de build
 .env
+.env.*
+!.env.example
+
+# Dados locais, banco SQLite e cofre de segredos em arquivo
+data
+*.db
+*.sqlite
+*.sqlite3
+secrets.enc
+*.pem
+*.key
+
+# Testes e scripts administrativos (não necessários para servir a API)
+tests
+scripts
+
+# Logs, checkpoints e artefatos temporários
+*.log
+*.tmp
+*.ckpt
+*.pt
+*.onnx
+
+# Controle de versão e editor
+.git
+.gitignore
+.gitattributes
+.vscode
+.idea
+
+# Documentação (não entra na imagem; mantém o contexto de build pequeno)
+README.md
