@@ -56,6 +56,7 @@ TEAM_GUIDE = """Composição recomendada por tipo de entrega (ative SOMENTE quem
 - pesquisa / artigo: Pesquisador(es), Revisão da Literatura, Fundamentação Teórica, Analista, Redator, Revisor
 - monografia / tese: Pesquisador, Fundamentação Teórica, Revisão da Literatura, Metodologista, Analista, Redator, Revisor
 - estudo de caso: Pesquisador (e de domínio, se houver), Fundamentação Teórica, Metodologista, Analista, Redator, Revisor
+Monografia, tese, revisão da literatura e pesquisa: crie PELO MENOS 2 tarefas de pesquisa com subtemas distintos (base de fontes ampla).
 Fluxo típico: pesquisa → (revisão da literatura, fundamentação, metodologia — em paralelo quando possível) → análise → redação → revisão."""
 
 
@@ -106,7 +107,7 @@ def queries_prompt(task_title: str, task_desc: str, request: str, guidance: str)
 Descrição: {task_desc}
 Contexto do projeto: {request}
 {guidance}
-Gere de 2 a 3 consultas de busca acadêmica EM INGLÊS (palavras-chave objetivas, sem aspas) e, se fizer sentido, o ano mínimo de publicação.
+Gere de 3 a 5 consultas de busca acadêmica EM INGLÊS, cada uma cobrindo um ângulo diferente do tema (métodos, aplicações, avaliação, revisões/surveys) — palavras-chave objetivas, sem aspas e, se fizer sentido, o ano mínimo de publicação.
 Responda SOMENTE com JSON: {{"consultas": ["..."], "ano_minimo": null}}"""
 
 
@@ -219,7 +220,7 @@ Produza a SUA entrega em Markdown, completa e aprofundada, seguindo o formato de
 Use títulos (##), tabelas quando úteis e marque lacunas como [FONTE NECESSÁRIA] em vez de inventar."""
 
 
-def section_prompt(title: str, briefing: dict, outline: list[dict], idx: int, inputs: str, evidence: str, previous: str, guidance: str) -> str:
+def section_prompt(title: str, briefing: dict, outline: list[dict], idx: int, inputs: str, evidence: str, previous: str, guidance: str, written: str = "") -> str:
     sec = outline[idx]
     toc = "\n".join(f"{i + 1}. {s['titulo']} (~{s['palavras']} palavras){'  ← ESTA' if i == idx else ''}" for i, s in enumerate(outline))
     return f"""Você está escrevendo o documento "{title}" ({briefing.get('tipo_nome', 'documento acadêmico')}) SEÇÃO POR SEÇÃO.
@@ -235,6 +236,10 @@ Conteúdo esperado: {sec.get('conteudo', '')}
 Extensão: cerca de {sec['palavras']} palavras — texto DESENVOLVIDO, com parágrafos argumentativos completos, subseções (###) quando fizer sentido,
 tabelas/quadros quando ajudarem e transição para a próxima seção. Não repita o que já foi escrito.
 
+Já escrito nas seções anteriores (NÃO repita estes tópicos, definições nem os mesmos dados — avance o argumento;
+se precisar retomar algo, faça em uma frase e remeta à seção):
+{written or '(nada ainda)'}
+
 Final da seção anterior (para continuidade):
 {previous or '(início do documento)'}
 
@@ -245,7 +250,26 @@ Fontes (cite APENAS códigos [E#] desta lista; texto completo não foi lido — 
 {evidence}
 
 Comece com "## {idx + 1}. {sec['titulo']}". Não escreva referências nem resumo — são gerados à parte.
-Se faltar evidência para algo, escreva [FONTE NECESSÁRIA] em vez de inventar."""
+Se faltar evidência para algo, escreva [FONTE NECESSÁRIA] em vez de inventar.
+Cite uma fonte por colchete: [E1] [E3] (não use [E1, E3])."""
+
+
+def expand_prompt(section: str, target: int, evidence: str, inputs: str) -> str:
+    return f"""A seção abaixo ficou curta. Reescreva-a COMPLETA com cerca de {target} palavras, mantendo título, estrutura e citações válidas,
+aprofundando: explique mecanismos e conceitos, compare abordagens, discuta implicações, limitações e exemplos — sempre com base nas
+entregas e fontes abaixo. Não invente dados, números nem referências; não repita frases.
+
+<secao>
+{section[:20000]}
+</secao>
+
+Entregas da equipe:
+{inputs[:20000]}
+
+Fontes (cite somente [E#] desta lista):
+{evidence}
+
+Devolva SOMENTE a seção reescrita em Markdown."""
 
 
 def abstract_prompt(title: str, briefing: dict, digest: str) -> str:

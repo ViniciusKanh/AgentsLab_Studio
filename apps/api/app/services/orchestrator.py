@@ -681,7 +681,7 @@ class Orchestrator:
         r = await self.llm(project_id=p.id, task_id=t.id, agent=agent, purpose="queries", json_mode=True, max_tokens=400,
                            messages=[system, {"role": "user", "content": P.queries_prompt(t.title, t.description, p.request, guidance)}])
         q = parse_json(r.text)
-        queries = [str(x)[:200] for x in (q.get("consultas") or [])][:3] or [t.title]
+        queries = [str(x)[:200] for x in (q.get("consultas") or [])][:5] or [t.title]
         year = q.get("ano_minimo") if isinstance(q.get("ano_minimo"), int) else None
         self.step(t, agent.id, p.id, 1, f"buscando fontes ({len(queries)} consultas)", r.input_tokens + r.output_tokens)
         self.agent_state(agent.id, "working", t, project_id=p.id)
@@ -692,7 +692,7 @@ class Orchestrator:
             self.check_running(p.id)
             t0 = time.perf_counter()
             try:
-                res = await tools.search(query, limit=5, from_year=year)
+                res = await tools.search(query, limit=8, from_year=year)
             except Exception as exc:
                 errors.append(str(exc))
                 self.tool_call(project_id=p.id, task_id=t.id, agent_id=agent.id, tool="literature_search", input=query, output=str(exc), status="error",
@@ -785,12 +785,25 @@ class Orchestrator:
         for i, sec in enumerate(outline):
             self.step(t, agent.id, p.id, i + 1, f"redigindo seção {i + 1}/{len(outline)}: {sec['titulo'][:60]}")
             prev = sections[-1][-1500:] if sections else ""
-            r = await self.llm(project_id=p.id, task_id=t.id, agent=agent, purpose="report", max_tokens=min(8000, int(sec["palavras"] * 2.2) + 600),
-                               messages=[system, {"role": "user", "content": P.section_prompt(p.title, briefing, outline, i, block, ev, prev, guidance)}])
+            written = "\n".join(f"- {h}" for x in sections for h in re.findall(r"(?m)^#{2,3} (.+)$", x))
+            max_tok = min(8000, int(sec["palavras"] * 2.2) + 600)
+            r = await self.llm(project_id=p.id, task_id=t.id, agent=agent, purpose="report", max_tokens=max_tok,
+                               messages=[system, {"role": "user", "content": P.section_prompt(p.title, briefing, outline, i, block, ev, prev, guidance, written)}])
             text = r.text.strip()
             if not text.lstrip().startswith("#"):
                 text = f"## {i + 1}. {sec['titulo']}\n\n{text}"
             text = re.split(r"\n#{1,3}\s*Refer[êe]ncias", text)[0].rstrip()
+            # extensão: seção abaixo de 70% do alvo ganha UMA reescrita aprofundada (só é aceita se ficar maior)
+            if word_count(text) < 0.7 * sec["palavras"]:
+                self.step(t, agent.id, p.id, i + 1, f"aprofundando seção {i + 1}/{len(outline)} ({word_count(text)} de ~{sec['palavras']} palavras)")
+                try:
+                    r2 = await self.llm(project_id=p.id, task_id=t.id, agent=agent, purpose="expand", max_tokens=max_tok,
+                                        messages=[system, {"role": "user", "content": P.expand_prompt(text, sec["palavras"], ev, block)}])
+                    longer = re.split(r"\n#{1,3}\s*Refer[êe]ncias", r2.text.strip())[0].rstrip()
+                    if longer.startswith("#") and word_count(longer) > word_count(text):
+                        text = longer
+                except LLMError:
+                    pass  # mantém a versão já escrita
             sections.append(text)
         self.step(t, agent.id, p.id, len(outline) + 1, "redigindo resumo e palavras-chave")
         digest = "\n".join(sec[:700] for sec in sections)
@@ -1247,12 +1260,17 @@ def latest_version(s, artifact_id: str) -> ArtifactVersion | None:
     return s.scalars(select(ArtifactVersion).where(ArtifactVersion.artifact_id == artifact_id).order_by(ArtifactVersion.version.desc())).first()
 
 
+CITE_GROUP = re.compile(r"\[(E\d+(?:\s*[,;]\s*E\d+)*)\]")
+
+
 def cited_codes(text: str) -> list[str]:
+    """Códigos citados, inclusive em grupos como [E2, E4]."""
     seen = []
-    for m in re.findall(r"\[E(\d+)\]", text):
-        c = f"E{m}"
-        if c not in seen:
-            seen.append(c)
+    for g in CITE_GROUP.findall(text):
+        for m in re.findall(r"E(\d+)", g):
+            c = f"E{m}"
+            if c not in seen:
+                seen.append(c)
     return seen
 
 
@@ -1278,6 +1296,10 @@ def with_references(text: str, evs: list[Evidence]) -> tuple[str, str]:
     ok = sum(1 for c in cited_codes(body) if c in by and by[c].verification == "verificada")
     note = f"{len(refs)} referências ({ok} verificadas, {len(refs) - ok} não confirmadas)" + (f"; citações inexistentes: {', '.join(bad)}" if bad else "")
     return body + "\n\n## Referências\n\n" + ("\n".join(refs) or "_Nenhuma fonte citada._") + "\n", note
+
+
+def word_count(text: str) -> int:
+    return len(re.findall(r"\w+", text))
 
 
 def rebuild_toc(doc: str) -> str:

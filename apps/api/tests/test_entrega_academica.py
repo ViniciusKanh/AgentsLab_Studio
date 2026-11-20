@@ -86,3 +86,17 @@ def test_atualizacao_unica_da_equipe_existente(env):
         red = s.get(Agent, red_id)
         assert red.role.startswith("Especialista em Redação") and "REDATORA" in red.config["intelligence"]["instructions"]
         assert s.scalars(select(Agent).where(Agent.name == "Especialista em Metodologia Científica")).first() is not None
+
+
+def test_citacoes_em_grupo_sao_reconhecidas():
+    """[E2, E5] conta como citação de E2 e E5 — e E5 inexistente é apontado."""
+    from types import SimpleNamespace as NS
+
+    from app.services.orchestrator import cited_codes, invalid_citations, with_references
+
+    txt = "Texto [E2, E4] e limitação [E2; E5]. Outro [E1]."
+    assert cited_codes(txt) == ["E2", "E4", "E5", "E1"]
+    evs = [NS(code=c, doi="", url="u", authors="A", year=2024, title="T", source="openalex", verification="verificada") for c in ("E1", "E2", "E4")]
+    assert invalid_citations(txt, evs) == ["E5"]
+    doc, note = with_references(txt, evs)
+    assert "[E4]" in doc and "citações inexistentes: E5" in note

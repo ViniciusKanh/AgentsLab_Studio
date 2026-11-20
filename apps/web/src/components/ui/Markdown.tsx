@@ -28,7 +28,7 @@ const plain = (t: string) => t.replace(/\*\*|__|`/g, '').replace(/\[([^\]]+)\]\(
 
 function inline(text: string, key: string): ReactNode[] {
   const out: ReactNode[] = []
-  const re = /(\*\*[^*]+\*\*|\*[^*\s][^*]*\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^)\s]+\)|https?:\/\/[^\s)<>\]]+|\[E\d+\]|\[(?:FONTE NECESSÁRIA|RESULTADO NÃO FORNECIDO|[A-ZÁÉÍÓÚÂÊÔÃÕÇ ]{6,}[^\]]*)\])/g
+  const re = /(\*\*[^*]+\*\*|\*[^*\s][^*]*\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^)\s]+\)|https?:\/\/[^\s)<>\]]+|\[E\d+(?:\s*[,;]\s*E\d+)*\]|\[(?:FONTE NECESSÁRIA|RESULTADO NÃO FORNECIDO|[A-ZÁÉÍÓÚÂÊÔÃÕÇ ]{6,}[^\]]*)\])/g
   let last = 0
   let m: RegExpExecArray | null
   let i = 0
@@ -42,7 +42,7 @@ function inline(text: string, key: string): ReactNode[] {
       const [, label, href] = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(t)!
       out.push(<a key={k} href={href} target="_blank" rel="noreferrer noopener" className="md-link">{label}</a>)
     } else if (t.startsWith('http')) out.push(<a key={k} href={t} target="_blank" rel="noreferrer noopener" className="md-link break-all">{t}</a>)
-    else if (/^\[E\d+\]$/.test(t)) out.push(<span key={k} className="md-cite">{t}</span>)
+    else if (/^\[E\d+(?:\s*[,;]\s*E\d+)*\]$/.test(t)) out.push(<span key={k} className="md-cite">{t}</span>)
     else if (t.startsWith('[')) out.push(<mark key={k} className="md-pending">{t}</mark>)
     else out.push(<em key={k}>{t.slice(1, -1)}</em>)
     last = m.index + t.length
