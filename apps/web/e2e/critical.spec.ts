@@ -111,6 +111,12 @@ test.describe('Conectado à API (modo de teste determinístico)', () => {
     await page.getByTestId('area-documentos').click()
     await expect(page.getByTestId('document-view')).toContainText('Referências')
     await expect(page.getByTestId('document-meta')).toContainText('Tarefa de origem')
+    // tela de entrega: leitura com sumário navegável e exportação .md/PDF
+    await page.getByTestId('open-delivery').click()
+    await expect(page.getByTestId('delivery-page')).toContainText('Sumário')
+    await expect(page.getByTestId('delivery-page')).toContainText('Referências')
+    await expect(page.getByTestId('delivery-pdf')).toBeEnabled()
+    await page.goBack()
     await page.getByRole('tab', { name: /Evidências/ }).click()
     await expect(page.getByTestId('evidence-table')).toContainText('E1')
     await expect(page.getByTestId('evidence-table')).toContainText('apenas resumo')

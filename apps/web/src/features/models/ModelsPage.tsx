@@ -116,7 +116,7 @@ function UsageTab() {
       <Panel accent="gold" title={`Por modelo · total ${fmtCost(total)}`}>{table(usage.byModel, (k) => k ?? '—')}</Panel>
       <Panel accent="purple" title="Por projeto">{table(usage.byProject, (k) => (k ? projects.find((p) => p.id === k)?.title ?? k : 'Conversas avulsas'))}</Panel>
       <Panel accent="green" title="Por provedor">{table(usage.byProvider, (k) => k ?? '—')}
-        <p className="mt-2 text-[10.5px] text-lab-muted">Custos calculados pelo LiteLLM a partir dos tokens informados pelo provedor — tratados como <b>estimativa</b>. Modelos locais (Ollama) não têm custo de API.</p>
+        <p className="mt-2 text-[10.5px] text-lab-muted">Custos calculados pelo LiteLLM a partir dos tokens informados pelo provedor — tratados como <b>estimativa</b>.</p>
       </Panel>
     </div>
   )
@@ -183,7 +183,7 @@ function CredentialsTab() {
             <Field label="Chave de API" hint={real ? 'Enviada ao backend local e guardada no cofre do sistema operacional. Nunca é salva no navegador.' : 'Inicie o backend local para cadastrar chaves reais.'}>
               <input type="password" autoComplete="off" className="px-input" value={apiKey} onChange={(e) => setApiKey(e.target.value)} disabled={!real} placeholder={real ? 'cole a chave aqui' : 'disponível com o backend'} />
             </Field>
-            <button className="px-btn solid w-full" onClick={submit} disabled={!real || alias.trim().length < 3 || (provider !== 'ollama' && apiKey.trim().length < 8)} data-testid="cred-create"><Plus size={14} /> Criar perfil</button>
+            <button className="px-btn solid w-full" onClick={submit} disabled={!real || alias.trim().length < 3 || apiKey.trim().length < 8} data-testid="cred-create"><Plus size={14} /> Criar perfil</button>
           </div>
         </Panel>
         <Panel accent="cyan" title="Como as chaves são protegidas">
@@ -285,7 +285,7 @@ function ProvidersTab({ focus }: { focus: ProviderId | null }) {
                   setCustom({ ...custom, [p.id]: '' })
                 }} aria-label="Adicionar modelo"><Plus size={12} /></button>
               </div>
-              {p.id !== 'huggingface' && (
+              {(
                 <button className="px-btn sm ghost" disabled={!real || busy === p.id || (p.kind !== 'local' && !keys)} onClick={() => void refresh(p.id)} title={p.kind !== 'local' && !keys ? 'Cadastre uma chave primeiro' : 'Consulta a API do provedor com a sua chave'} data-testid={`refresh-models-${p.id}`}>
                   <RefreshCw size={12} className={busy === p.id ? 'animate-spin' : ''} /> {busy === p.id ? 'Consultando…' : 'Atualizar lista de modelos'}
                 </button>

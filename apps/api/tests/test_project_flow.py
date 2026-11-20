@@ -36,7 +36,7 @@ def test_fluxo_completo_aeronautica(client, env):
     msgs = client.get(f"{API}/projects/{pid}/messages").json()
     types = {m["type"] for m in msgs}
     assert {"solicitacao", "aprovacao", "entrega", "revisao"} <= types
-    assert any(m["type"] == "entrega" and m["fromAgentId"] == agent_id(client, "Pesquisador Científico") and m["toAgentId"] == agent_id(client, "Analista Técnico") for m in msgs)
+    assert any(m["type"] == "entrega" and m["fromAgentId"] == agent_id(client, "Pesquisador Científico") and m["toAgentId"] == agent_id(client, "Analista Técnico-Científico") for m in msgs)
     # evidências reais registradas, sem duplicatas
     evs = client.get(f"{API}/projects/{pid}/evidence").json()
     assert [e["code"] for e in evs] == ["E1", "E2"] and evs[0]["doi"] == "10.1000/abc" and not evs[0]["fullText"]
@@ -68,7 +68,7 @@ def test_fluxo_completo_aeronautica(client, env):
     final = status(client, pid)
     assert final["llmCalls"] == len(exes) and abs(final["costUsd"] - 0.001 * len(exes)) < 1e-9
     usage = client.get(f"{API}/usage").json()
-    assert any(u["key"] == agent_id(client, "Redator Técnico-Científico") for u in usage["byAgent"])
+    assert any(u["key"] == agent_id(client, "Especialista em Redação Acadêmica e Documentação Científica") for u in usage["byAgent"])
     ov = client.get(f"{API}/overview").json()
     assert ov["projects"]["completed"] == 1 and ov["llmCalls"] == len(exes)
 
@@ -126,7 +126,7 @@ def test_reanalisar_apos_trocar_modelo_e_repetir_tarefas(client, env):
     wait_for(lambda: status(client, pid)["status"] == "failed")
     client.post(f"{API}/credentials", json={"provider": "groq", "alias": "Groq pessoal", "api_key": "gsk-TESTE-000001"})
     r = client.post(f"{API}/projects/{pid}/reanalyze", json={"provider": "groq", "model": "llama-teste", "applyToTeam": True})
-    assert r.status_code == 200 and r.json()["agentsUpdated"] == 6
+    assert r.status_code == 200 and r.json()["agentsUpdated"] == 9
     p = wait_for(lambda: (d := status(client, pid))["status"] == "awaiting_approval" and d)
     assert len(p["tasks"]) == 5
     exe = client.get(f"{API}/projects/{pid}/executions").json()

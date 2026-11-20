@@ -8,7 +8,7 @@
 
 export type DataOrigin = 'demo' | 'real'
 
-export type ProviderId = 'gemini' | 'groq' | 'openai' | 'huggingface' | 'ollama'
+export type ProviderId = 'gemini' | 'groq' | 'openai'
 
 /** Estados mínimos de execução (CLAUDE.md §7). Derivados de eventos do backend. */
 export type AgentRuntimeState =
@@ -252,7 +252,6 @@ export interface TokenPoint {
   gemini: number
   groq: number
   openai: number
-  huggingface: number
 }
 
 export interface DashboardData {

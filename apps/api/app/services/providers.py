@@ -9,7 +9,6 @@ import asyncio
 import httpx
 from sqlalchemy.orm import Session
 
-from app.config import settings
 from app.models import KeyValue
 
 # Catálogo de modelos. Preços são REFERÊNCIAS para estimativa (US$/1M tokens); o custo registrado vem do LiteLLM.
@@ -24,11 +23,6 @@ CATALOG = [
     {"id": "openai", "name": "OpenAI", "kind": "cloud", "badge": "Alta Qualidade", "defaultModel": "gpt-4.1-mini", "models": [
         {"id": "gpt-4.1-mini", "name": "GPT-4.1 mini", "contextWindow": 1_000_000, "inputPer1M": 0.4, "outputPer1M": 1.6, "priceIsEstimate": True, "tags": ["custo"]},
         {"id": "gpt-4.1", "name": "GPT-4.1", "contextWindow": 1_000_000, "inputPer1M": 2, "outputPer1M": 8, "priceIsEstimate": True, "tags": ["qualidade"]}]},
-    {"id": "huggingface", "name": "Hugging Face", "kind": "cloud", "badge": "Modelos Abertos", "defaultModel": "meta-llama/Llama-3.1-8B-Instruct", "models": [
-        {"id": "meta-llama/Llama-3.1-8B-Instruct", "name": "Llama 3.1 8B Instruct", "contextWindow": 128_000, "inputPer1M": None, "outputPer1M": None, "priceIsEstimate": True, "tags": ["open-weights"]}]},
-    {"id": "ollama", "name": "Ollama (local)", "kind": "local", "badge": "Local", "defaultModel": "llama3.1:8b", "models": [
-        {"id": "llama3.1:8b", "name": "Llama 3.1 8B (local)", "contextWindow": 128_000, "inputPer1M": 0, "outputPer1M": 0, "priceIsEstimate": False, "tags": ["sem custo de API"]},
-        {"id": "qwen2.5:7b", "name": "Qwen 2.5 7B (local)", "contextWindow": 32_000, "inputPer1M": 0, "outputPer1M": 0, "priceIsEstimate": False, "tags": ["local"]}]},
 ]
 
 
@@ -58,7 +52,7 @@ def provider_state(db: Session, owner: str, pid: str) -> dict:
     base = next(p for p in CATALOG if p["id"] == pid)
     pref = get_prefs(db, owner).get(pid, {})
     models = pref.get("models") or base["models"]
-    return {"enabled": pref.get("enabled", pid in ("gemini", "groq", "ollama", "openai", "huggingface")),
+    return {"enabled": pref.get("enabled", pid in PROVIDER_IDS),
             "defaultModel": pref.get("defaultModel") or base["defaultModel"], "models": models,
             "modelsSyncedAt": pref.get("modelsSyncedAt")}
 
@@ -133,9 +127,4 @@ async def list_remote_models(provider: str, api_key: str | None, transport: http
             if provider == "groq":
                 ids = [i for i in ids if not any(k in i for k in ("whisper", "tts", "guard", "playai"))]
             return [{"id": i, "name": i, "contextWindow": None, "inputPer1M": None, "outputPer1M": None, "priceIsEstimate": True, "tags": ["disponível na sua chave"]} for i in ids], []
-        if provider == "ollama":
-            r = await c.get(f"{settings.ollama_base_url.rstrip('/')}/api/tags")
-            r.raise_for_status()
-            return [{"id": m["name"], "name": f"{m['name']} (local)", "contextWindow": None, "inputPer1M": 0, "outputPer1M": 0, "priceIsEstimate": False, "tags": ["local"]}
-                    for m in r.json().get("models", [])], []
     raise ValueError("Listagem automática não disponível para este provedor; informe o id do modelo manualmente.")

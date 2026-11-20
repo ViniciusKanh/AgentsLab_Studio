@@ -9,6 +9,4 @@ export const PROVIDER_COLORS: Record<string, string> = {
   gemini: '#3b82f6',
   groq: '#ff537a',
   openai: '#00f5a0',
-  huggingface: '#ffb800',
-  ollama: '#e6ecff',
 }

@@ -53,24 +53,17 @@ class LLMGateway(Protocol):
 
 
 def litellm_model(provider: str, model: str) -> str:
-    if provider == "openai":
-        return model
-    if provider == "huggingface":
-        return f"huggingface/{model}"
-    return f"{provider}/{model}"
+    return model if provider == "openai" else f"{provider}/{model}"
 
 
 class LiteLLMGateway:
     async def complete(self, *, provider, model, api_key, messages, temperature=0.3, max_tokens=2048, json_mode=False, purpose="", timeout=120):
         import litellm
 
-        if provider != "ollama" and not api_key:
+        if not api_key:
             raise MissingCredential(f"Nenhuma chave configurada para {provider}. Cadastre em Provedores e Custos → Chaves.")
         kwargs: dict = dict(model=litellm_model(provider, model), messages=messages, temperature=temperature, max_tokens=max_tokens, timeout=timeout)
-        if api_key:
-            kwargs["api_key"] = api_key
-        if provider == "ollama":
-            kwargs["api_base"] = settings.ollama_base_url
+        kwargs["api_key"] = api_key
         if json_mode and provider in ("openai", "groq", "gemini"):
             kwargs["response_format"] = {"type": "json_object"}
         t0 = time.perf_counter()

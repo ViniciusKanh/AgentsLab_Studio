@@ -6,7 +6,7 @@ import type { AgentDraft, BehaviorProfile, MemoryMode, AutonomyLevel, ProviderId
 import { useLabStore } from '@/stores/labStore'
 import { AGENT_CHARACTERS } from '@/world/maps'
 import { personalityFor, PERSONALITY_LABELS } from '@/world/ambient/personality'
-import { ENVIRONMENTS, INTEGRATIONS_CATALOG, KNOWLEDGE_BASES, TOOLS_CATALOG } from '@/services/demo/demoData'
+import { ENVIRONMENTS, KNOWLEDGE_BASES, TOOLS_CATALOG } from '@/services/demo/demoData'
 import { Avatar, Chip, DemoTag, Field, Panel, Toggle, cx } from '@/components/ui/primitives'
 import { appConfig } from '@/services/config'
 import { providerIconUrl } from '@/lib/assets'
@@ -219,14 +219,6 @@ export default function AgentStudioPage() {
                   ))}
                 </div>
                 {errors.permissions && <ErrorLine msg={errors.permissions} />}
-                <p className="px-label">Integrações</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {INTEGRATIONS_CATALOG.map((i) => {
-                    const on = draft.integrations.includes(i)
-                    return <button key={i} onClick={() => patch('integrations', on ? draft.integrations.filter((x) => x !== i) : [...draft.integrations, i])} className={cx('rounded-[3px] border px-2 py-0.5 text-[11px] font-bold', on ? 'border-neon-cyan bg-neon-cyan/15 text-neon-cyan' : 'border-lab-line text-lab-muted')} aria-pressed={on}>{i}</button>
-                  })}
-                </div>
-                <p className="text-[10.5px] text-lab-muted">As integrações reais serão conectadas pelo backend (Fase 4). Aqui apenas registramos a autorização.</p>
               </>
             )}
 
@@ -352,7 +344,7 @@ function Review({ draft, errors }: { draft: AgentDraft; errors: Errors }) {
     ['Nome', draft.name || '—'], ['Papel', draft.role], ['Departamento', draft.department], ['Ambiente', ENVIRONMENTS.find((e) => e.id === draft.environmentId)?.name],
     ['Objetivo', draft.objective || '—'], ['Modelo', `${draft.intelligence.provider} / ${modelLabel(draft.intelligence.model, useLabStore.getState().providers.find((x) => x.id === draft.intelligence.provider)?.defaultModel)}`],
     ['Comportamento', `${draft.intelligence.behavior} · temp ${draft.intelligence.temperature} · top-p ${draft.intelligence.topP}`],
-    ['Ferramentas', draft.tools.join(', ') || '—'], ['Integrações', draft.integrations.join(', ') || '—'],
+    ['Ferramentas', draft.tools.join(', ') || '—'],
     ['Conhecimento', `${draft.knowledge.sources.join(', ') || 'sem fontes'} · memória ${draft.knowledge.memory} · RAG ${draft.knowledge.ragEnabled ? draft.knowledge.ragBaseId : 'desativado'}`],
     ['Limites', `${draft.limits.maxTokensPerRun} tokens/run · US$ ${draft.limits.maxCostPerDayUsd}/dia · ${draft.limits.timeoutSec}s · ${draft.limits.maxRetries} retentativas`],
     ['Regras', `${draft.rules.autonomy} · revisão humana ${draft.rules.requireHumanReview ? 'sim' : 'não'} · delegação ${draft.rules.allowDelegation ? 'sim' : 'não'}`],

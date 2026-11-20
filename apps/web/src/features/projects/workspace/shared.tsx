@@ -35,6 +35,7 @@ export const DOC_KIND: Record<string, { label: string; group: 'final' | 'parcial
   report: { label: 'Relatório consolidado', group: 'final' },
   findings: { label: 'Achados de pesquisa', group: 'parcial' },
   analysis: { label: 'Análise técnica', group: 'parcial' },
+  specialist: { label: 'Entrega de especialista', group: 'parcial' },
   review: { label: 'Parecer de revisão', group: 'revisao' },
 }
 

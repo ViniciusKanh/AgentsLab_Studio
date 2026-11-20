@@ -12,12 +12,12 @@ import { STATE_META } from '@/simulation/states'
 import { ConfirmModal } from '@/components/ui/Modal'
 
 // ---------------------------------------------------------------------------
-export function ProvidersPanel({ providers, compact }: { providers: Provider[]; compact?: boolean }) {
+export function ProvidersPanel({ providers }: { providers: Provider[]; compact?: boolean }) {
   const update = useLabStore((s) => s.updateProvider)
   const nav = useNavigate()
   return (
     <ul className="space-y-1.5">
-      {providers.filter((p) => compact ? p.id !== 'ollama' : true).map((p) => (
+      {providers.map((p) => (
         <li key={p.id} className="px-inset flex items-center gap-2 px-2 py-1.5">
           <img src={providerIconUrl(p.id)} alt="" className="pixel h-6 w-6" />
           <span className="min-w-0 flex-1">

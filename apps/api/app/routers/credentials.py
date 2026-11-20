@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/v1/credentials", tags=["credentials"])
 
 
 class CredentialIn(BaseModel):
-    provider: Literal["gemini", "groq", "openai", "huggingface", "ollama"]
+    provider: Literal["gemini", "groq", "openai"]
     alias: str = Field(min_length=3, max_length=60)
     api_key: str = Field(default="", max_length=400)
     is_default: bool = False

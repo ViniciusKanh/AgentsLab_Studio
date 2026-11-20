@@ -33,3 +33,19 @@ describe('componentes de UI', () => {
     expect(screen.getByText(/\+9,3%/)).toBeInTheDocument()
   })
 })
+
+describe('Markdown (leitor de documentos)', () => {
+  it('gera títulos com âncora, tabela com cabeçalho, citações e pendências destacadas', async () => {
+    const { render } = await import('@testing-library/react')
+    const { Markdown, extractHeadings } = await import('@/components/ui/Markdown')
+    const src = '---\ndocumento: D1\n---\n# Título\n\n## 1. Introdução\n\nTexto [E1] e [FONTE NECESSÁRIA].\n\n| A | B |\n|---|---:|\n| x | 2 |\n\n- item\n  - sub\n\n> citação'
+    const { container } = render(<Markdown source={src} size="lg" variant="paper" />)
+    expect(container.querySelector('h2#sec-1-introducao')).not.toBeNull()
+    expect(container.querySelector('thead th')?.textContent).toBe('A')
+    expect(container.querySelector('.md-cite')?.textContent).toBe('[E1]')
+    expect(container.querySelector('.md-pending')?.textContent).toBe('[FONTE NECESSÁRIA]')
+    expect(container.querySelector('blockquote')).not.toBeNull()
+    expect(container.textContent).not.toContain('documento: D1')
+    expect(extractHeadings(src).map((h) => h.level)).toEqual([1, 2])
+  })
+})

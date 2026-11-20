@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, Pause, Play, RefreshCcw, RotateCw, Square } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, BookOpen, Pause, Play, RefreshCcw, RotateCw, Square } from 'lucide-react'
 import type { AgentMessage, Artifact, Evidence, Execution, Project, ToolCall } from '@/types/platform'
 import { appConfig } from '@/services/config'
 import { platform, PROJECT_STATUS } from '@/services/platform'
@@ -119,6 +119,7 @@ export default function ProjectWorkspacePage() {
           <p className="flex justify-between gap-3"><span className="text-lab-muted">Custo (estimativa)</span><b>{fmtCost(project.costUsd)} / {fmtCost(project.budgetUsd)}</b></p>
         </div>
         <div className="flex flex-wrap gap-1.5 self-center">
+          {artifacts.some((x) => x.kind === 'report') && <Link to={`/projetos/${project.id}/entrega`} className="px-btn sm solid" data-testid="open-delivery"><BookOpen size={14} /> Ver entrega</Link>}
           {['running', 'revising'].includes(project.status) && <button className="px-btn sm" style={{ ['--c' as string]: '#ffb800' }} onClick={() => void act(() => platform.control(project.id, 'pause'), 'Pausa solicitada — vale a partir da próxima etapa de cada agente')}><Pause size={14} /> Pausar</button>}
           {project.status === 'paused' && <button className="px-btn sm solid" onClick={() => void act(() => platform.control(project.id, 'resume'), 'Execução retomada')}><Play size={14} /> Retomar</button>}
           {['failed', 'awaiting_approval', 'paused', 'delivered', 'cancelled'].includes(project.status) && <button className="px-btn sm" style={{ ['--c' as string]: '#39d6ff' }} onClick={() => setReanalyze(true)} data-testid="project-reanalyze"><RefreshCcw size={14} /> Reanalisar</button>}

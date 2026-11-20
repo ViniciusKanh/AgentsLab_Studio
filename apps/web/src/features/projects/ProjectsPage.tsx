@@ -11,7 +11,19 @@ import { Chip, Field, Panel, ProgressBar } from '@/components/ui/primitives'
 import { OfflineNotice } from '@/components/ui/OfflineNotice'
 import { fmtCost, timeAgo } from '@/lib/format'
 
-const EXAMPLE = 'Quero uma pesquisa sobre aplicações de inteligência artificial na aeronáutica, com foco em manutenção preditiva, inspeção visual e segurança operacional. Entregue um relatório técnico com tabela comparativa, limitações e referências verificáveis.'
+const EXAMPLE = 'quero entender como a inteligência artificial ajuda na manutenção de aviões, tipo prever falha de motor e inspecionar a fuselagem. queria algo completo pra usar no meu mestrado'
+
+const TYPES: { id: string; label: string; hint: string }[] = [
+  { id: '', label: 'Automático', hint: 'O coordenador escolhe o formato a partir do pedido' },
+  { id: 'pesquisa', label: 'Estudo de pesquisa', hint: '~5 mil palavras' },
+  { id: 'monografia', label: 'Monografia', hint: '~9 mil palavras' },
+  { id: 'tese', label: 'Tese / dissertação', hint: '~14 mil palavras (texto-base)' },
+  { id: 'estudo_de_caso', label: 'Estudo de caso', hint: '~6 mil palavras' },
+  { id: 'artigo', label: 'Artigo científico', hint: '~6 mil palavras' },
+  { id: 'revisao_literatura', label: 'Revisão da literatura', hint: '~7 mil palavras' },
+  { id: 'relatorio_tecnico', label: 'Relatório técnico', hint: '~4 mil palavras' },
+]
+const LENGTHS = [{ id: 'padrao', label: 'Padrão' }, { id: 'extensa', label: 'Extensa (~1,5×)' }, { id: 'maxima', label: 'Máxima (~2×)' }]
 
 /** Projetos: criados por prompt em linguagem natural e planejados pelo coordenador da organização. */
 export default function ProjectsPage() {
@@ -25,6 +37,8 @@ export default function ProjectsPage() {
   const [title, setTitle] = useState('')
   const [request, setRequest] = useState('')
   const [budget, setBudget] = useState(2)
+  const [kind, setKind] = useState('')
+  const [length, setLength] = useState('padrao')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const real = appConfig.mode === 'real'
@@ -44,8 +58,8 @@ export default function ProjectsPage() {
     setBusy(true)
     setError('')
     try {
-      const p = await platform.createProject({ request: request.trim(), title: title.trim(), organizationId: orgId || null, budgetUsd: budget })
-      toast('Projeto criado: o coordenador está montando o plano', 'success')
+      const p = await platform.createProject({ request: request.trim(), title: title.trim(), organizationId: orgId || null, budgetUsd: budget, deliverableType: kind, length })
+      toast('Projeto criado: o coordenador está interpretando o pedido e montando o plano', 'success')
       nav(`/projetos/${p.id}`)
     } catch (err) {
       setError((err as Error).message)
@@ -66,16 +80,23 @@ export default function ProjectsPage() {
         <Panel accent="green" title="Novo projeto">
           <div className="grid gap-3 lg:grid-cols-[1fr_260px]">
             <div className="space-y-2.5">
-              <Field label="O que você precisa?" required hint="Linguagem natural. Seja específico sobre escopo, formato e critérios.">
+              <Field label="O que você precisa?" required hint="Escreva do seu jeito, em linguagem simples. O coordenador transforma o pedido em uma especificação acadêmica (tipo de entrega, pergunta de pesquisa, objetivos e estrutura de seções), define o papel de cada agente e estima o tempo — você revisa tudo antes de aprovar.">
                 <textarea className="px-input h-36 text-[14px] leading-relaxed" value={request} onChange={(e) => setRequest(e.target.value)} placeholder={EXAMPLE} data-testid="project-request" />
               </Field>
-              <button className="text-[12.5px] font-bold text-neon-cyan" onClick={() => { setRequest(EXAMPLE); setTitle('IA na aeronáutica') }}>Usar exemplo: pesquisa sobre IA na aeronáutica</button>
+              <button className="text-[12.5px] font-bold text-neon-cyan" onClick={() => setRequest(EXAMPLE)}>Usar exemplo de pedido leigo</button>
             </div>
             <div className="space-y-2.5">
               <Field label="Organização" required>
                 <select className="px-input" value={orgId} onChange={(e) => setOrgId(e.target.value)} data-testid="project-org">{orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select>
               </Field>
-              <Field label="Título (opcional)"><input className="px-input" value={title} onChange={(e) => setTitle(e.target.value)} /></Field>
+              <Field label="Tipo de entrega">
+                <select className="px-input" value={kind} onChange={(e) => setKind(e.target.value)} data-testid="project-type">{TYPES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}</select>
+                <span className="mt-1 block text-[12px] text-lab-muted">{TYPES.find((t) => t.id === kind)?.hint}</span>
+              </Field>
+              <Field label="Extensão do documento">
+                <select className="px-input" value={length} onChange={(e) => setLength(e.target.value)} data-testid="project-length">{LENGTHS.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}</select>
+              </Field>
+              <Field label="Título (opcional — gerado pelo coordenador se vazio)"><input className="px-input" value={title} onChange={(e) => setTitle(e.target.value)} /></Field>
               <Field label="Orçamento máximo (US$)" hint="A execução pausa ao atingir o limite."><input type="number" min={0.01} step={0.5} className="px-input" value={budget} onChange={(e) => setBudget(Math.max(0.01, +e.target.value))} /></Field>
               <button className="px-btn solid w-full" onClick={() => void submit()} disabled={busy} data-testid="project-submit"><Send size={14} /> {busy ? 'Enviando…' : 'Enviar ao coordenador'}</button>
               {error && <p className="text-[12.5px] text-neon-pink">{error}</p>}

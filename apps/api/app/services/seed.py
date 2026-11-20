@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.db import session_scope
 from app.models import Agent, Department, Organization
+from app.services.academic_agents import ACADEMIC_AGENTS, ACADEMIC_VERSION
 
 # model vazio = usa o "modelo padrão" escolhido pelo usuário em Provedores e Custos
 DEFAULT_MODEL = {"provider": "gemini", "model": ""}
@@ -37,13 +38,14 @@ def agent_config(*, description: str, objective: str, character: str, color: str
 RESEARCH = {
     "id": "org-pesquisa-ia", "name": "Laboratório de Pesquisa em IA", "template": "research_lab", "environment_id": "research",
     "description": "Equipe de pesquisa científica: levantamento bibliográfico, análise e redação técnica com evidências verificáveis.",
-    "departments": ["Coordenação", "Pesquisa", "Análise", "Redação", "Qualidade"],
+    "departments": ["Coordenação", "Pesquisa", "Pesquisa Aplicada", "Análise", "Redação Acadêmica", "Qualidade Científica",
+                    "Revisão da Literatura", "Fundamentação Teórica", "Metodologia e Experimentos"],
     "agents": [
         ("ag-coordenador", "Coordenador de Pesquisa", "Coordenador", "Coordenação", True, "orquestradora", "#ffb800", "research-w_lab1",
          "Interpreta solicitações, define objetivo, escopo e divide o trabalho entre a equipe com dependências claras.", [], False),
         ("ag-pesq-cientifico", "Pesquisador Científico", "Pesquisador Científico", "Pesquisa", False, "pesquisadora", "#39d6ff", "research-w_lab2",
          "Busca e seleciona literatura científica (OpenAlex, arXiv), registra cada fonte como evidência e resume achados citando [E#].", ["literature_search"], True),
-        ("ag-pesq-aero", "Pesquisadora de Aplicações Aeronáuticas", "Pesquisador de Aplicações", "Pesquisa", False, "rag", "#e9ecf5", "research-w_lab3",
+        ("ag-pesq-aero", "Pesquisadora de Aplicações Aeronáuticas", "Pesquisador de Aplicações", "Pesquisa Aplicada", False, "rag", "#39d6ff", "research-w_lab3",
          "Investiga aplicações práticas e casos de uso no domínio do projeto, registrando evidências verificáveis.", ["literature_search"], True),
         ("ag-analista-tec", "Analista Técnico", "Analista Técnico", "Análise", False, "analista", "#00f5a0", "research-w_banc1",
          "Compara abordagens, identifica tendências, riscos, limitações e lacunas a partir das entregas e evidências.", [], False),
@@ -51,6 +53,12 @@ RESEARCH = {
          "Consolida as entregas da equipe em um relatório estruturado, citando apenas evidências registradas.", [], False),
         ("ag-revisor-cient", "Revisor Científico", "Revisor Científico", "Qualidade", False, "revisor", "#9d62ff", "research-w_banc3",
          "Avalia coerência, rigor, cobertura do escopo e se toda afirmação relevante está sustentada por evidência.", [], False),
+        ("ag-rev-lit", "Especialista em Revisão da Literatura", "Especialista em Revisões Bibliográficas e Trabalhos Relacionados", "Revisão da Literatura", False,
+         "pesquisadora", "#b48cff", "research-w_banc4", "Seleciona, classifica e sintetiza estudos.", ["literature_search"], True),
+        ("ag-fund-teo", "Especialista em Fundamentação Teórica", "Especialista em Bases Conceituais e Fundamentação Científica", "Fundamentação Teórica", False,
+         "planejador", "#ffb800", None, "Estrutura conceitos, princípios e bases teóricas.", ["literature_search"], True),
+        ("ag-metodo", "Especialista em Metodologia Científica", "Especialista em Metodologia, Experimentos e Validação Científica", "Metodologia e Experimentos", False,
+         "engenheiro", "#7fe3ff", None, "Planeja métodos, protocolos e avaliação.", ["literature_search"], True),
     ],
 }
 
@@ -78,12 +86,74 @@ OFFICE = {
 
 TEMPLATES = [
     {"id": "research_lab", "name": "Laboratório de Pesquisa", "environmentId": "research", "departments": RESEARCH["departments"],
-     "roles": ["Coordenador", "Pesquisador Científico", "Pesquisador de Aplicações", "Analista Técnico", "Redator Técnico-Científico", "Revisor Científico"]},
+     "roles": ["Coordenador", "Pesquisador Científico"] + [a["role"] for a in ACADEMIC_AGENTS]},
     {"id": "business_office", "name": "Escritório Empresarial", "environmentId": "office", "departments": OFFICE["departments"],
      "roles": ["Gestor", "Analista Financeiro", "Analista Contábil", "Assistente Administrativo", "Analista Comercial", "Redator de Marketing", "Engenheiro de Software"]},
     {"id": "software_factory", "name": "Fábrica de Software", "environmentId": "office", "departments": ["Produto", "Engenharia", "Qualidade", "Documentação"],
      "roles": ["Gerente de Produto", "Engenheiro de Software", "Engenheiro de Testes", "Redator Técnico"]},
 ]
+
+
+ACADEMIC = {a["name"]: a for a in ACADEMIC_AGENTS}
+_ACADEMIC_TOOLS = {"Pesquisadora de Aplicações Aeronáuticas", "Especialista em Revisão da Literatura", "Especialista em Fundamentação Teórica",
+                   "Especialista em Metodologia Científica", "Analista Técnico", "Revisor Científico"}  # Busca acadêmica (OpenAlex + arXiv) — funcional
+
+
+def apply_academic(cfg: dict, spec: dict) -> dict:
+    """Aplica identidade, inteligência, limites e regras do documento de configuração (preserva avatar/estação)."""
+    cfg = dict(cfg)
+    intel = dict(cfg.get("intelligence") or {})
+    intel.update({"instructions": spec["instructions"], "behavior": "analitico", "temperature": spec["temperature"], "topP": spec["topP"], "maxOutputTokens": 4096})
+    tools = list(cfg.get("tools") or [])
+    if spec["name"] in _ACADEMIC_TOOLS and "literature_search" not in tools:
+        tools.append("literature_search")
+    cfg.update({
+        "description": spec["description"], "objective": spec["objective"], "intelligence": intel, "tools": tools, "tags": spec["tags"],
+        "permissions": {"readFiles": True, "writeFiles": False, "internet": "literature_search" in tools, "externalApis": "literature_search" in tools,
+                        "sensitiveRequiresApproval": True},
+        "knowledge": {"sources": ["Artigos científicos", "Documentação técnica"], "documents": [], "memory": "short", "ragEnabled": False, "ragBaseId": None},
+        "limits": {"maxTokensPerRun": 8000, "maxCostPerDayUsd": spec["maxCostPerDayUsd"], "timeoutSec": 240, "maxRetries": 1},
+        "rules": {"autonomy": "supervised", "requireHumanReview": True, "allowDelegation": False, "restrictions": spec["restrictions"]},
+        "personality": {**spec["personality"], "preference": "duplas"}, "version": "2.0.0",
+    })
+    appearance = dict(cfg.get("appearance") or {})
+    if not appearance.get("accentColor"):
+        appearance["accentColor"] = spec["color"]
+    cfg["appearance"] = appearance
+    return cfg
+
+
+def upgrade_research_team(owner: str) -> int:
+    """Atualização ÚNICA das organizações de pesquisa existentes: edita os 4 agentes do documento (mesmo id,
+    avatar e histórico) e cria os 3 novos. Coordenador e Pesquisador Científico não são alterados."""
+    from app.models import KeyValue, uid
+
+    flag = f"{ACADEMIC_VERSION}:{owner}"
+    changed = 0
+    with session_scope() as s:
+        if s.get(KeyValue, flag):
+            return 0
+        s.add(KeyValue(key=flag, value={"at": "upgrade"}))
+        s.flush()
+        for org in s.scalars(select(Organization).where(Organization.owner_id == owner, Organization.template == "research_lab")):
+            agents = {a.name: a for a in s.scalars(select(Agent).where(Agent.owner_id == owner, Agent.organization_id == org.id))}
+            depts = {d.name for d in s.scalars(select(Department).where(Department.organization_id == org.id))}
+            for spec in ACADEMIC_AGENTS:
+                if spec["department"] not in depts:
+                    s.add(Department(organization_id=org.id, name=spec["department"]))
+                    depts.add(spec["department"])
+                a = agents.get(spec["name"])
+                if a is not None:
+                    a.role, a.department, a.config = spec["role"], spec["department"], apply_academic(a.config or {}, spec)
+                    changed += 1
+                elif spec["create"]:
+                    row = next(r for r in RESEARCH["agents"] if r[1] == spec["name"])
+                    base = agent_config(description=spec["description"], objective=spec["objective"], character=spec.get("character") or row[5], color=spec["color"],
+                                        env=org.environment_id, station=row[7], instructions=spec["instructions"], tools=row[9], internet=row[10])
+                    s.add(Agent(id=uid("ag"), owner_id=owner, organization_id=org.id, name=spec["name"], role=spec["role"], department=spec["department"],
+                                is_coordinator=False, config=apply_academic(base, spec)))
+                    changed += 1
+    return changed
 
 
 _seeded: set[str] = set()
@@ -100,10 +170,15 @@ def seed_for_owner(owner: str = "local") -> bool:
         if owner in _seeded:
             return False
         try:
-            return _seed(owner)
+            created = _seed(owner)
         except IntegrityError:  # outro processo semeou ao mesmo tempo
             _seeded.add(owner)
             return False
+        try:
+            upgrade_research_team(owner)
+        except IntegrityError:
+            pass
+        return created
 
 
 def _seed(owner: str) -> bool:
@@ -127,6 +202,10 @@ def _seed(owner: str) -> bool:
             for (_aid, name, role, dept, coord, char, color, station, desc, tools, internet) in org["agents"]:
                 cfg = agent_config(description=desc, objective=desc, character=char, color=color, env=org["environment_id"], station=station,
                                    instructions=f"Atue como {role}. {desc} Explique decisões e limitações.", tools=tools, internet=internet)
+                spec = ACADEMIC.get(name) if org is RESEARCH else None
+                if spec:
+                    role, dept, cfg = spec["role"], spec["department"], apply_academic(cfg, spec)
                 s.add(Agent(id=uid("ag"), owner_id=owner, organization_id=oid, name=name, role=role, department=dept, is_coordinator=coord, config=cfg))
+        s.add(KeyValue(key=f"{ACADEMIC_VERSION}:{owner}", value={"at": "seed"}))
     _seeded.add(owner)
     return True

@@ -54,7 +54,34 @@ export interface TaskContext {
 
 export interface ApprovedPlan { aprovadoEm: string; nota: string; tarefas: { key: string; title: string; kind: TaskKind; agentId: string | null; dependsOn: string[]; deliverable: string }[] }
 
+export type DeliverableType = 'pesquisa' | 'monografia' | 'tese' | 'estudo_de_caso' | 'artigo' | 'revisao_literatura' | 'relatorio_tecnico'
+export type DocLength = 'padrao' | 'extensa' | 'maxima'
+
+/** Engenharia do pedido feita pelo coordenador a partir do texto leigo do gestor. */
+export interface Briefing {
+  tipo_entrega: DeliverableType
+  tipo_nome: string
+  titulo: string
+  pedido_tecnico: string
+  pedido_original?: string
+  pergunta_pesquisa: string
+  objetivo_geral: string
+  objetivos_especificos: string[]
+  publico?: string
+  norma?: string
+  extensao: DocLength
+  palavras_alvo: number
+}
+
+export interface OutlineSection { titulo: string; conteudo: string; palavras: number }
+
 export interface ProjectPlan {
+  briefing?: Briefing
+  estrutura?: OutlineSection[]
+  estimativa_tempo_min?: { min: number; max: number; e_estimativa: boolean; base: string }
+  estimativa_chamadas?: number
+  papeis?: { agentId: string | null; tarefa: string; papel: string }[]
+  preferencias?: { tipo_solicitado?: string; extensao?: DocLength; titulo_automatico?: boolean }
   objetivo?: string
   escopo?: string
   subtemas?: string[]

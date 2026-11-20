@@ -6,15 +6,19 @@ import { useUiStore } from '@/stores/uiStore'
 import { Avatar, Chip, Field, Panel } from '@/components/ui/primitives'
 import { fmtCost, fmtDate } from '@/lib/format'
 import { Empty, TASK_STATUS, stages, useAgentName, useTeam, type Nav } from './shared'
+import { BriefingPanel } from './BriefingPanel'
 
 /** Planejamento: revisão/aprovação do plano e, depois, o plano aprovado (registro imutável) e o fluxo de dependências. */
 export function PlanningArea({ project, onDone, nav }: { project: Project; onDone: () => void; nav: Nav }) {
   if (project.status === 'planning') return <Empty>O coordenador está interpretando a solicitação e montando o plano…</Empty>
-  if (project.status === 'awaiting_approval') return <PlanReview project={project} onDone={onDone} />
+  if (project.status === 'awaiting_approval') return <div className="flex flex-col gap-3"><BriefingPanel project={project} /><PlanReview project={project} onDone={onDone} /></div>
   return (
+    <div className="flex flex-col gap-3">
+    <BriefingPanel project={project} compact />
     <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_380px]">
       <FlowBoard project={project} nav={nav} />
       <PlanSummary project={project} />
+    </div>
     </div>
   )
 }

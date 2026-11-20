@@ -15,6 +15,7 @@ const SettingsPage = lazy(() => import('@/features/settings/SettingsPage'))
 const OrganizationsPage = lazy(() => import('@/features/organizations/OrganizationsPage'))
 const ProjectsPage = lazy(() => import('@/features/projects/ProjectsPage'))
 const ProjectWorkspacePage = lazy(() => import('@/features/projects/ProjectWorkspacePage'))
+const DeliveryPage = lazy(() => import('@/features/projects/DeliveryPage'))
 const DocumentsPage = lazy(() => import('@/features/documents/DocumentsPage'))
 const Auth = () => import('@/features/auth/AuthPages')
 const LoginPage = lazy(() => Auth().then((m) => ({ default: m.LoginPage })))
@@ -81,6 +82,7 @@ export const routes = [
       { path: 'agentes/:agentId/editar', element: S(<AgentStudioPage />) },
       { path: 'projetos', element: S(<ProjectsPage />) },
       { path: 'projetos/:projectId', element: S(<ProjectWorkspacePage />) },
+      { path: 'projetos/:projectId/entrega', element: S(<DeliveryPage />) },
       { path: 'fluxos', element: S(<WorkflowStudioPage />) },
       { path: 'documentos', element: S(<DocumentsPage />) },
       { path: 'execucoes', element: S(<RunsPage />) },

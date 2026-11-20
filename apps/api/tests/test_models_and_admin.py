@@ -112,6 +112,6 @@ def test_conta_principal_cria_promove_e_assume_dados_locais(env, monkeypatch):
     with db.session_scope() as s:
         assert s.scalars(select(Organization).where(Organization.owner_id == "local")).first()
     moved = adopt_local_data(user["id"])
-    assert moved["organizations"] == 2 and moved["agents"] == 13
+    assert moved["organizations"] == 2 and moved["agents"] == 16
     with db.session_scope() as s:
         assert not s.scalars(select(Organization).where(Organization.owner_id == "local")).first()

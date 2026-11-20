@@ -93,7 +93,7 @@ def _providers(db: Session, owner: str) -> list[dict]:
         has_cred = db.scalars(select(Credential).where(Credential.provider == p["id"], Credential.owner_id == owner)).first() is not None
         tokens = db.scalar(select(func.coalesce(func.sum(Execution.input_tokens + Execution.output_tokens), 0)).where(Execution.provider == p["id"], Execution.owner_id == owner, Execution.created_at >= since))
         cost = db.scalar(select(func.coalesce(func.sum(Execution.cost_usd), 0.0)).where(Execution.provider == p["id"], Execution.owner_id == owner, Execution.created_at >= since))
-        out.append({**p, **st, "status": "connected" if (has_cred or p["id"] == "ollama") else "not_configured",
+        out.append({**p, **st, "status": "connected" if has_cred else "not_configured",
                     "usage": {"tokensMonth": int(tokens or 0), "quotaMonth": 0, "costUsdMonth": round(float(cost or 0), 6)}, "origin": "real"})
     return out
 
@@ -151,14 +151,12 @@ async def refresh_models(pid: str, db: Session = Depends(get_db), u: CurrentUser
     """Atualiza a lista de modelos consultando a API do provedor com a chave padrão do usuário."""
     if pid not in PROVIDER_IDS:
         raise HTTPException(404, "Provedor desconhecido")
-    key = None
-    if pid != "ollama":
-        try:
-            key = CredentialService(db, owner_id=u.id).resolve(pid, None)
-        except VaultError as exc:
-            raise HTTPException(503, str(exc)) from exc
-        if not key:
-            raise HTTPException(422, "Cadastre uma chave deste provedor para listar os modelos.")
+    try:
+        key = CredentialService(db, owner_id=u.id).resolve(pid, None)
+    except VaultError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    if not key:
+        raise HTTPException(422, "Cadastre uma chave deste provedor para listar os modelos.")
     try:
         models, dropped = await list_remote_models(pid, key)
     except ValueError as exc:

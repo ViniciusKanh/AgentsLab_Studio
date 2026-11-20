@@ -10,7 +10,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 DataOrigin = Literal["demo", "real"]
-ProviderId = Literal["gemini", "groq", "openai", "huggingface", "ollama"]
+ProviderId = Literal["gemini", "groq", "openai"]
 AgentRuntimeState = Literal["idle", "planning", "working", "collaborating", "reviewing", "completed", "failed", "paused"]
 
 

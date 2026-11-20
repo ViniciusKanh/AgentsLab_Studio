@@ -119,7 +119,7 @@ def _validate_agent(body: dict):
         if len(str(body.get(f, "")).strip()) < n:
             raise HTTPException(422, f"Campo '{f}' inválido")
     intel = body.get("intelligence") or {}
-    if intel.get("provider") not in ("gemini", "groq", "openai", "huggingface", "ollama"):
+    if intel.get("provider") not in ("gemini", "groq", "openai"):
         raise HTTPException(422, "Provedor obrigatório (o modelo pode ficar vazio = padrão do provedor)")
 
 

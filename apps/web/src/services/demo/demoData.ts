@@ -73,8 +73,8 @@ export const DEMO_AGENTS: Agent[] = [
   baseAgent({
     id: 'ag-automacao', name: 'Automação de Tarefas', role: 'Engenheiro(a) de Automação', department: 'Operações',
     description: 'Executa rotinas e integra ferramentas.', appearance: { characterId: 'ops', accentColor: '#39d6ff' },
-    environmentId: 'office', stationId: 'office-w_auto', personality: { sociability: 35, creativity: 30, organization: 80, curiosity: 60, collaboration: 50, initiative: 90, preference: 'individual' }, tags: ['API', 'n8n', 'Agenda'], tools: ['http', 'scheduler'],
-    intelligence: { provider: 'ollama', model: 'llama3.2:3b', behavior: 'executor', temperature: 0.2, topP: 0.8, maxOutputTokens: 1024, instructions: 'Execute rotinas agendadas e reporte falhas com contexto.' },
+    environmentId: 'office', stationId: 'office-w_auto', personality: { sociability: 35, creativity: 30, organization: 80, curiosity: 60, collaboration: 50, initiative: 90, preference: 'individual' }, tags: ['API', 'Agenda'], tools: ['http', 'scheduler'],
+    intelligence: { provider: 'groq', model: 'llama-3.1-8b-instant', behavior: 'executor', temperature: 0.2, topP: 0.8, maxOutputTokens: 1024, instructions: 'Execute rotinas agendadas e reporte falhas com contexto.' },
     stats: { runs: 154, successRate: 0.94, tokens30d: 900_000, costUsd30d: 0, avgLatencySec: 7.9 },
   }),
   baseAgent({
@@ -122,7 +122,7 @@ export const DEMO_AGENTS: Agent[] = [
     id: 'ag-avaliadora', name: 'Avaliadora de Modelos', role: 'Cientista de Avaliação', department: 'Pesquisa',
     description: 'Compara modelos e estratégias com benchmarks.', appearance: { characterId: 'assistente', accentColor: '#ff537a' },
     environmentId: 'research', stationId: 'research-w_lab3', personality: { sociability: 60, creativity: 55, organization: 70, curiosity: 85, collaboration: 65, initiative: 60, preference: 'duplas' }, tags: ['Benchmark', 'F1', 'ROUGE'], tools: ['python', 'eval'],
-    intelligence: { provider: 'huggingface', model: 'meta-llama/Llama-3.1-8B-Instruct', behavior: 'analitico', temperature: 0.1, topP: 0.9, maxOutputTokens: 2048, instructions: 'Execute benchmarks reprodutíveis e registre métricas com intervalos de confiança.' },
+    intelligence: { provider: 'groq', model: 'llama-3.3-70b-versatile', behavior: 'analitico', temperature: 0.1, topP: 0.9, maxOutputTokens: 2048, instructions: 'Execute benchmarks reprodutíveis e registre métricas com intervalos de confiança.' },
     stats: { runs: 64, successRate: 0.95, tokens30d: 1_100_000, costUsd30d: 0.12, avgLatencySec: 11.2 },
   }),
   baseAgent({
@@ -139,7 +139,7 @@ DEMO_AGENTS.push(baseAgent({
   description: 'Organiza amostras e monitora equipamentos.', appearance: { characterId: 'robo2', accentColor: '#ff537a' },
   environmentId: 'research', stationId: 'research-w_banc2', tags: ['Suporte', 'Monitoramento'], tools: ['scheduler'],
   personality: { sociability: 60, creativity: 30, organization: 85, curiosity: 75, collaboration: 70, initiative: 90, preference: 'duplas' },
-  intelligence: { provider: 'ollama', model: 'llama3.2:3b', behavior: 'executor', temperature: 0.2, topP: 0.8, maxOutputTokens: 1024, instructions: 'Monitore equipamentos e reporte anomalias com contexto e horário.' },
+  intelligence: { provider: 'groq', model: 'llama-3.1-8b-instant', behavior: 'executor', temperature: 0.2, topP: 0.8, maxOutputTokens: 1024, instructions: 'Monitore equipamentos e reporte anomalias com contexto e horário.' },
   stats: { runs: 58, successRate: 0.97, tokens30d: 300_000, costUsd30d: 0, avgLatencySec: 3.1 },
 }))
 
@@ -175,22 +175,6 @@ export const DEMO_PROVIDERS: Provider[] = [
       { id: 'gpt-4.1-mini', name: 'GPT-4.1 mini', contextWindow: 1_000_000, inputPer1M: 0.4, outputPer1M: 1.6, priceIsEstimate: true, tags: ['custo'] },
     ],
   },
-  {
-    id: 'huggingface', name: 'Hugging Face', kind: 'cloud', status: 'connected', badge: 'Modelos Abertos', enabled: true, defaultModel: 'meta-llama/Llama-3.1-8B-Instruct', origin: 'demo',
-    usage: { tokensMonth: 320_000, quotaMonth: 1_000_000, costUsdMonth: 0.18 },
-    models: [
-      { id: 'meta-llama/Llama-3.1-8B-Instruct', name: 'Llama 3.1 8B Instruct', contextWindow: 128_000, inputPer1M: null, outputPer1M: null, priceIsEstimate: true, tags: ['open-weights'] },
-      { id: 'Qwen/Qwen2.5-7B-Instruct', name: 'Qwen 2.5 7B Instruct', contextWindow: 32_000, inputPer1M: null, outputPer1M: null, priceIsEstimate: true, tags: ['open-weights', 'multilíngue'] },
-    ],
-  },
-  {
-    id: 'ollama', name: 'Ollama (local)', kind: 'local', status: 'not_configured', badge: 'Local', enabled: false, defaultModel: 'llama3.2:3b', origin: 'demo',
-    usage: { tokensMonth: 0, quotaMonth: 0, costUsdMonth: 0 },
-    models: [
-      { id: 'llama3.2:3b', name: 'Llama 3.2 3B', contextWindow: 128_000, inputPer1M: 0, outputPer1M: 0, priceIsEstimate: false, tags: ['local', 'sem custo de API'] },
-      { id: 'qwen2.5:7b', name: 'Qwen 2.5 7B', contextWindow: 32_000, inputPer1M: 0, outputPer1M: 0, priceIsEstimate: false, tags: ['local'] },
-    ],
-  },
 ]
 
 export const ENVIRONMENTS: EnvironmentInfo[] = [
@@ -199,7 +183,7 @@ export const ENVIRONMENTS: EnvironmentInfo[] = [
   { id: 'orchestration', name: 'Central de Orquestração', description: 'Fluxos, filas, tarefas e integrações.', thumbnail: '/assets/environments/orchestration_preview.png', availability: 'planned', accent: '#00f5a0', unlockLevel: 10 },
   { id: 'library', name: 'Biblioteca de Agentes', description: 'Repositório de agentes, templates e compartilhamento.', thumbnail: '/assets/environments/library_preview.png', availability: 'planned', accent: '#ffb800', unlockLevel: 15 },
   { id: 'arena', name: 'Arena de Testes', description: 'Avaliação, benchmarks e comparativos.', thumbnail: '/assets/environments/arena_preview.png', availability: 'planned', accent: '#39d6ff', unlockLevel: 20 },
-  { id: 'automation', name: 'Estúdio de Automação', description: 'Integrações, APIs, ETL e n8n.', thumbnail: '/assets/environments/automation_preview.png', availability: 'planned', accent: '#ffb800', unlockLevel: 25 },
+  { id: 'automation', name: 'Estúdio de Automação', description: 'Automação de rotinas e ETL.', thumbnail: '/assets/environments/automation_preview.png', availability: 'planned', accent: '#ffb800', unlockLevel: 25 },
   { id: 'projects', name: 'Sala de Projetos', description: 'Roadmaps, kanban e planejamento das equipes.', thumbnail: '/assets/environments/projects_preview.png', availability: 'planned', accent: '#ff537a', unlockLevel: 30 },
 ]
 
@@ -232,7 +216,6 @@ export const TOOLS_CATALOG: { id: string; name: string; risk: string; implemente
   { id: 'storage', name: 'Armazenamento de arquivos', risk: 'alto' },
 ] as const
 
-export const INTEGRATIONS_CATALOG = ['Salesforce', 'Power BI', 'n8n', 'Google Drive', 'Slack', 'GitHub', 'PostgreSQL', 'Movidesk']
 
 export const DEMO_WORKFLOWS: Workflow[] = [
   {
@@ -280,7 +263,7 @@ const RUN_TITLES = [
 
 export function demoRuns(count = 12, seed = 7): ExecutionRun[] {
   const r = seeded(seed)
-  const providers: ProviderId[] = ['gemini', 'groq', 'openai', 'huggingface']
+  const providers: ProviderId[] = ['gemini', 'groq', 'openai']
   return Array.from({ length: count }, (_, i) => {
     const ag = DEMO_AGENTS[Math.floor(r() * DEMO_AGENTS.length)]
     const status = i === 3 ? 'warning' : r() < 0.06 ? 'error' : 'ok'
@@ -298,7 +281,7 @@ export function demoExperiments(): Experiment[] {
     { id: 'ex1', name: 'RAG – Documentos UNESP', provider: 'gemini', model: 'gemini-2.5-pro', metric: 'F1', value: 0.92, status: 'done', date: iso(36e5 * 4), origin: 'demo' },
     { id: 'ex2', name: 'Resumo Científico (Multi)', provider: 'openai', model: 'gpt-4.1', metric: 'ROUGE-L', value: 0.88, status: 'done', date: iso(36e5 * 24), origin: 'demo' },
     { id: 'ex3', name: 'Classificação de Tickets', provider: 'groq', model: 'llama-3.3-70b-versatile', metric: 'Acc', value: 0.94, status: 'done', date: iso(36e5 * 48), origin: 'demo' },
-    { id: 'ex4', name: 'Extração de Entidades', provider: 'huggingface', model: 'Qwen2.5-7B', metric: 'F1', value: 0.81, status: 'running', date: iso(36e5 * 1), origin: 'demo' },
+    { id: 'ex4', name: 'Extração de Entidades', provider: 'groq', model: 'llama-3.1-8b-instant', metric: 'F1', value: 0.81, status: 'running', date: iso(36e5 * 1), origin: 'demo' },
   ]
 }
 
@@ -331,10 +314,9 @@ export function demoDashboard(period: DashboardPeriod, agentCount: number, workf
       gemini: Math.round((260 + r() * 60) * trend * k),
       groq: Math.round((150 + r() * 50) * trend * k),
       openai: Math.round((210 + r() * 70) * trend * k),
-      huggingface: Math.round((70 + r() * 40) * trend * k),
     }
   })
-  const tokens = series.reduce((s, p) => s + p.gemini + p.groq + p.openai + p.huggingface, 0)
+  const tokens = series.reduce((s, p) => s + p.gemini + p.groq + p.openai, 0)
   const s = cfg.scale
   return {
     period, origin: 'demo',

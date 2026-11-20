@@ -133,11 +133,11 @@ def test_feedback_em_tarefa_propaga_para_dependentes(client, env):
     r = client.post(f"{API}/projects/{pid}/feedback", json={"taskId": by["T3"]["id"], "text": "Inclua métricas de precisão por dataset na comparação."})
     assert r.status_code == 200
     routed = r.json()["feedback"]
-    assert routed["tasks"] == ["FB1", "UP1", "RR1"] and routed["agentId"] == agent_id(client, "Analista Técnico")
+    assert routed["tasks"] == ["FB1", "UP1", "RR1"] and routed["agentId"] == agent_id(client, "Analista Técnico-Científico")
     p = wait_for(lambda: (d := status(client, pid))["status"] == "delivered" and d, timeout=30)
     by = {t["key"]: t for t in p["tasks"]}
-    assert by["FB1"]["agentId"] == agent_id(client, "Analista Técnico") and by["FB1"]["targetArtifactId"] == analysis_id
-    assert by["UP1"]["agentId"] == agent_id(client, "Redator Técnico-Científico") and by["UP1"]["dependsOn"] == ["FB1"]
+    assert by["FB1"]["agentId"] == agent_id(client, "Analista Técnico-Científico") and by["FB1"]["targetArtifactId"] == analysis_id
+    assert by["UP1"]["agentId"] == agent_id(client, "Especialista em Redação Acadêmica e Documentação Científica") and by["UP1"]["dependsOn"] == ["FB1"]
     assert by["UP1"]["startedAt"] >= by["FB1"]["finishedAt"] and by["RR1"]["startedAt"] >= by["UP1"]["finishedAt"]
     assert by["RR1"]["kind"] == "review" and by["RR1"]["status"] == "done"
     arts = {a["id"]: a for a in client.get(f"{API}/projects/{pid}/artifacts").json()}

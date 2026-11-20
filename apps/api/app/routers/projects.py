@@ -50,6 +50,16 @@ class ProjectIn(BaseModel):
     title: str = ""
     organizationId: str | None = None
     budgetUsd: float | None = Field(default=None, gt=0, le=100)
+    # "" = o coordenador decide a partir do pedido
+    deliverableType: str = Field(default="", pattern="^(|pesquisa|monografia|tese|estudo_de_caso|artigo|revisao_literatura|relatorio_tecnico)$")
+    length: str = Field(default="padrao", pattern="^(padrao|extensa|maxima)$")
+
+
+@router.get("/deliverable-types")
+def deliverable_types():
+    from app.services.prompts import DELIVERABLES, LENGTH_FACTOR
+
+    return {"types": [{"id": k, "name": v["nome"], "words": v["palavras"], "sections": v["secoes"]} for k, v in DELIVERABLES.items()], "lengthFactor": LENGTH_FACTOR}
 
 
 @router.get("")
@@ -67,7 +77,8 @@ async def create_project(body: ProjectIn, db: Session = Depends(get_db), u: Curr
         if not o or o.owner_id != u.id:
             raise HTTPException(404, "Organização não encontrada")
     title = body.title.strip() or body.request.strip().split("\n")[0][:80]
-    pid = orchestrator.create_project(body.organizationId, title, body.request, body.budgetUsd, owner=u.id)
+    pid = orchestrator.create_project(body.organizationId, title, body.request, body.budgetUsd, owner=u.id,
+                                      deliverable_type=body.deliverableType, length=body.length, auto_title=not body.title.strip())
     return project_public(db.get(Project, pid), db, full=True)
 
 
@@ -127,7 +138,7 @@ async def delivery_decision(pid: str, body: DecisionIn, db: Session = Depends(ge
 
 
 class ReanalyzeIn(BaseModel):
-    provider: str | None = Field(default=None, pattern="^(gemini|groq|openai|huggingface|ollama)$")
+    provider: str | None = Field(default=None, pattern="^(gemini|groq|openai)$")
     model: str = Field(default="", max_length=120)
     applyToTeam: bool = False
     note: str = Field(default="", max_length=2000)
@@ -229,7 +240,7 @@ def artifacts(pid: str, db: Session = Depends(get_db), u: CurrentUser = Depends(
     return out
 
 
-KIND_LABEL = {"findings": "Achados de pesquisa", "analysis": "Análise técnica", "report": "Relatório consolidado", "review": "Parecer de revisão"}
+KIND_LABEL = {"findings": "Achados de pesquisa", "analysis": "Análise técnica", "specialist": "Entrega de especialista", "report": "Documento final", "review": "Parecer de revisão"}
 
 
 def _metadata(db: Session, p: Project, a: Artifact, v: ArtifactVersion | None) -> dict:

@@ -9,14 +9,18 @@ from app.services.llm import LLMResult, MissingCredential, TransientLLMError
 from app.services.tools import Source
 
 PLAN = {
+    "briefing": {"tipo_entrega": "pesquisa", "titulo": "Inteligência Artificial na aeronáutica", "pedido_tecnico": "Mapear aplicações de IA na aeronáutica.",
+                 "pergunta_pesquisa": "Como a IA é aplicada à manutenção aeronáutica?", "objetivo_geral": "Mapear aplicações", "objetivos_especificos": ["Comparar abordagens"]},
+    "estrutura": [{"titulo": "Introdução", "conteudo": "contexto", "palavras": 600}, {"titulo": "Manutenção preditiva", "conteudo": "métodos", "palavras": 900},
+                  {"titulo": "Conclusão", "conteudo": "síntese", "palavras": 500}],
     "objetivo": "Mapear aplicações de IA na aeronáutica", "escopo": "Literatura 2019+", "subtemas": ["manutenção preditiva", "visão computacional"],
     "entregaveis": ["Relatório técnico"], "criterios_qualidade": ["citações verificáveis"],
     "tarefas": [
         {"chave": "T1", "titulo": "Pesquisar manutenção preditiva", "descricao": "Literatura científica", "tipo": "pesquisa", "agente_id": "@Pesquisador Científico", "depende_de": [], "entregavel": "Achados"},
-        {"chave": "T2", "titulo": "Pesquisar aplicações em inspeção", "descricao": "Casos aeronáuticos", "tipo": "pesquisa", "agente_id": "@Pesquisador de Aplicações", "depende_de": [], "entregavel": "Achados"},
-        {"chave": "T3", "titulo": "Comparar abordagens", "descricao": "Tabela comparativa", "tipo": "analise", "agente_id": "@Analista Técnico", "depende_de": ["T1", "T2"], "entregavel": "Análise"},
-        {"chave": "T4", "titulo": "Redigir relatório", "descricao": "Documento final", "tipo": "redacao", "agente_id": "@Redator Técnico-Científico", "depende_de": ["T3"], "entregavel": "Relatório"},
-        {"chave": "T5", "titulo": "Revisar relatório", "descricao": "Qualidade", "tipo": "revisao", "agente_id": "@Revisor Científico", "depende_de": ["T4"], "entregavel": "Parecer"},
+        {"chave": "T2", "titulo": "Pesquisar aplicações em inspeção", "descricao": "Casos aeronáuticos", "tipo": "pesquisa", "agente_id": "@Especialista em Pesquisa Aplicada à Aeronáutica", "depende_de": [], "entregavel": "Achados"},
+        {"chave": "T3", "titulo": "Comparar abordagens", "descricao": "Tabela comparativa", "tipo": "analise", "agente_id": "@Analista Técnico-Científico", "depende_de": ["T1", "T2"], "entregavel": "Análise"},
+        {"chave": "T4", "titulo": "Redigir relatório", "descricao": "Documento final", "tipo": "redacao", "agente_id": "@Especialista em Redação Acadêmica e Documentação Científica", "depende_de": ["T3"], "entregavel": "Relatório"},
+        {"chave": "T5", "titulo": "Revisar relatório", "descricao": "Qualidade", "tipo": "revisao", "agente_id": "@Especialista em Revisão Crítica e Integridade Científica", "depende_de": ["T4"], "entregavel": "Parecer"},
     ],
 }
 
@@ -31,6 +35,24 @@ def plan_for(prompt: str) -> dict:
         if t["agente_id"].startswith("@"):
             t["agente_id"] = by_role.get(t["agente_id"][1:], "desconhecido")
     return plan
+
+
+def section_text(prompt: str) -> str:
+    """Seção do documento (redação por seções). Inclui uma citação inventada [E99] para testar a detecção."""
+    import re
+
+    m = re.search(r'Comece com "(## [^"]+)"', prompt)
+    head = m.group(1) if m else "# Relatório"
+    return f"{head}\n\nA IA melhora a manutenção [E1] e a inspeção [E2]. Afirmação inventada [E99].\n## Referências\n- referência inventada pelo modelo"
+
+
+def revised_text(prompt: str) -> str:
+    import re
+
+    m = re.search(r"<secao>\n(.*?)\n</secao>", prompt, re.S)
+    if m:  # revisão por seção: remove a citação inexistente
+        return m.group(1).replace(" Afirmação inventada [E99].", " (revisado).")
+    return "# Relatório (revisado)\nA IA melhora a manutenção [E1] e a inspeção [E2]."
 
 
 class FakeLLM:
@@ -69,8 +91,10 @@ class FakeLLM:
             "queries": json.dumps({"consultas": ["predictive maintenance aircraft machine learning"], "ano_minimo": 2019}),
             "findings": "## Achados\nModelos LSTM preveem falhas em motores [E1]. Inspeção por visão computacional [E2].",
             "analysis": "## Análise\n| Abordagem | Fonte |\n|---|---|\n| LSTM | [E1] |\n| CNN | [E2] |",
-            "report": "# Relatório\nA IA melhora a manutenção [E1] e a inspeção [E2]. Afirmação inventada [E99].\n## Referências\n- referência inventada pelo modelo",
-            "revision": "# Relatório (revisado)\nA IA melhora a manutenção [E1] e a inspeção [E2].",
+            "report": section_text(messages[-1]["content"]),
+            "abstract": json.dumps({"resumo": "Resumo do estudo.", "palavras_chave": ["IA", "aeronáutica"]}),
+            "specialist": "## Entrega do especialista\nConceitos fundamentais [E1].",
+            "revision": revised_text(messages[-1]["content"]),
             "chat": "Olá! Sou o agente e posso ajudar.",
         }.get(purpose, "ok")
         if purpose == "review":

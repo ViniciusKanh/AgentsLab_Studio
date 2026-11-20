@@ -24,8 +24,8 @@ from app.config import settings
 from app.models import Credential, Secret
 
 SERVICE = "AgentsLab_Studio"
-PROVIDERS = {"gemini", "groq", "openai", "huggingface", "ollama"}
-ENV_FALLBACK = {"gemini": "GEMINI_API_KEY", "groq": "GROQ_API_KEY", "openai": "OPENAI_API_KEY", "huggingface": "HUGGINGFACE_API_KEY"}
+PROVIDERS = {"gemini", "groq", "openai"}
+ENV_FALLBACK = {"gemini": "GEMINI_API_KEY", "groq": "GROQ_API_KEY", "openai": "OPENAI_API_KEY"}
 
 
 class VaultError(RuntimeError):
@@ -192,7 +192,7 @@ class CredentialService:
         if not 3 <= len(alias) <= 60:
             raise ValueError("Apelido deve ter entre 3 e 60 caracteres")
         api_key = (api_key or "").strip()
-        if provider != "ollama" and len(api_key) < 8:
+        if len(api_key) < 8:
             raise ValueError("Informe a chave de API (mínimo 8 caracteres)")
         first = not self.db.scalars(self._q().where(Credential.provider == provider)).first()
         c = Credential(owner_id=self.owner, provider=provider, alias=alias, last4=api_key[-4:] if api_key else None, is_default=make_default or first)

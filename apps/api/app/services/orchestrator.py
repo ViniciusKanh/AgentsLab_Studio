@@ -26,7 +26,82 @@ from app.services.tools import get_tools
 from app.services.providers import resolve_model
 from app.services.vault import CredentialService
 
-KIND_MAP = {"pesquisa": "research", "analise": "analysis", "análise": "analysis", "redacao": "writing", "redação": "writing", "revisao": "review", "revisão": "review", "geral": "general"}
+KIND_MAP = {"pesquisa": "research", "analise": "analysis", "análise": "analysis", "redacao": "writing", "redação": "writing", "revisao": "review", "revisão": "review",
+            "geral": "general", "especialista": "general", "fundamentacao": "general", "metodologia": "general", "revisao_literatura": "general"}
+ALLOWED_PROVIDERS = ("gemini", "groq", "openai")
+# segundos aproximados por tipo de tarefa (estimativa exibida ao gestor; o tempo real é medido por tarefa)
+EST_SECONDS = {"research": 150, "analysis": 90, "general": 100, "review": 75, "revision": 90}
+EST_SECONDS_PER_SECTION = 45
+
+
+def normalize_brief(plan: dict, request: str, forced_type: str = "", length: str = "padrao") -> tuple[dict, list[dict]]:
+    """Valida o briefing (engenharia do pedido) e a estrutura de seções; completa com a estrutura-base do tipo."""
+    b = dict(plan.get("briefing") or {})
+    tipo = forced_type or str(b.get("tipo_entrega") or "").strip().lower().replace(" ", "_").replace("-", "_")
+    tipo = {"estudo_caso": "estudo_de_caso", "dissertacao": "tese", "dissertação": "tese", "relatorio": "relatorio_tecnico", "revisao": "revisao_literatura"}.get(tipo, tipo)
+    if tipo not in P.DELIVERABLES:
+        tipo = "pesquisa"
+    spec = P.DELIVERABLES[tipo]
+    factor = P.LENGTH_FACTOR.get(length, 1.0)
+    target = int(spec["palavras"] * factor)
+    out = []
+    for sec in (plan.get("estrutura") or [])[:16]:
+        if not isinstance(sec, dict):
+            continue
+        titulo = str(sec.get("titulo") or "").strip().lstrip("#0123456789. ")[:120]
+        if not titulo or titulo.lower().startswith(("resumo", "referências", "referencias", "sumário", "sumario", "abstract")):
+            continue
+        try:
+            words = int(sec.get("palavras") or 0)
+        except (TypeError, ValueError):
+            words = 0
+        out.append({"titulo": titulo, "conteudo": str(sec.get("conteudo") or "")[:600], "palavras": words})
+    if len(out) < 3:  # estrutura insuficiente: usa a estrutura-base do tipo
+        out = [{"titulo": t, "conteudo": "", "palavras": 0} for t in spec["secoes"]]
+    total = sum(x["palavras"] for x in out) or 1
+    for x in out:  # redistribui para a extensão-alvo, com limites por seção (cada seção é uma chamada)
+        share = x["palavras"] / total if x["palavras"] else 1 / len(out)
+        x["palavras"] = max(350, min(2500, int(round(target * share / 50) * 50)))
+    b.update({"tipo_entrega": tipo, "tipo_nome": spec["nome"], "extensao": length, "palavras_alvo": sum(x["palavras"] for x in out),
+              "titulo": str(b.get("titulo") or "").strip()[:200], "pedido_original": request})
+    for k in ("pedido_tecnico", "pergunta_pesquisa", "objetivo_geral", "publico", "norma"):
+        b[k] = str(b.get(k) or "").strip()[:2000]
+    b["objetivos_especificos"] = [str(x)[:400] for x in (b.get("objetivos_especificos") or [])][:10]
+    return b, out
+
+
+def estimate_minutes(tasks: list[dict], sections: int) -> dict:
+    """Estimativa do tempo de execução pelo caminho crítico das dependências (+1 ciclo de revisão)."""
+    by = {t["key"]: t for t in tasks}
+    memo: dict[str, float] = {}
+
+    def dur(t):
+        if t["kind"] == "writing":
+            return 40 + EST_SECONDS_PER_SECTION * max(1, sections)
+        return EST_SECONDS.get(t["kind"], 90)
+
+    def finish(k, seen=()):
+        if k in memo:
+            return memo[k]
+        t = by[k]
+        start = max((finish(d, seen + (k,)) for d in t["depends_on"] if d in by and d not in seen), default=0)
+        memo[k] = start + dur(t)
+        return memo[k]
+
+    critical = max((finish(k) for k in by), default=0)
+    critical += EST_SECONDS_PER_SECTION * max(1, sections) * 0.6 + EST_SECONDS["review"]  # um ciclo de reavaliação
+    low = max(1, round(critical / 60))
+    return {"min": low, "max": max(low + 1, round(critical * 1.8 / 60)), "e_estimativa": True,
+            "base": "caminho crítico das dependências + 1 ciclo de revisão; varia com o provedor, limites de taxa e retentativas"}
+
+
+def find_agent(team: list, *keys: str):
+    """Agente cujo nome/papel/departamento contém alguma das chaves (na ordem das chaves)."""
+    for k in keys:
+        for a in team:
+            if k in f"{a.name} {a.role} {a.department}".lower():
+                return a
+    return None
 STEPS = {"research": 5, "analysis": 2, "writing": 3, "review": 2, "revision": 3, "general": 2}
 
 
@@ -139,6 +214,8 @@ class Orchestrator:
         cfg = agent.config or {}
         intel = cfg.get("intelligence", {})
         provider = intel.get("provider", "gemini")
+        if provider not in ALLOWED_PROVIDERS:  # Ollama/Hugging Face foram removidos da plataforma
+            provider = "gemini"
         owner = agent.owner_id
         with session_scope() as s:
             model, enabled = resolve_model(s, owner, provider, intel.get("model"))
@@ -158,7 +235,7 @@ class Orchestrator:
         try:
             if not enabled:
                 raise LLMError(f"O provedor {provider} está desativado em Provedores e Custos. Ative-o ou troque o modelo do agente ({agent.name}).")
-            if provider != "ollama" and not key:
+            if not key:
                 raise MissingCredential(f"Nenhuma chave configurada para {provider}. Cadastre em Provedores e Custos → Chaves.")
             if not model:
                 raise LLMError(f"Nenhum modelo definido para {provider}. Abra Provedores e Custos → Atualizar lista de modelos e salve um modelo padrão.")
@@ -202,9 +279,13 @@ class Orchestrator:
         return r
 
     # ------------------------------------------------------------------ projetos
-    def create_project(self, organization_id: str | None, title: str, request: str, budget_usd: float | None = None, owner: str = "local") -> str:
+    def create_project(self, organization_id: str | None, title: str, request: str, budget_usd: float | None = None, owner: str = "local",
+                       deliverable_type: str = "", length: str = "padrao", auto_title: bool = False) -> str:
         with session_scope() as s:
-            p = Project(owner_id=owner, organization_id=organization_id, title=title.strip()[:200], request=request.strip(), budget_usd=budget_usd or settings.default_project_budget_usd)
+            prefs = {"tipo_solicitado": deliverable_type if deliverable_type in P.DELIVERABLES else "", "extensao": length if length in P.LENGTH_FACTOR else "padrao",
+                     "titulo_automatico": auto_title}
+            p = Project(owner_id=owner, organization_id=organization_id, title=title.strip()[:200], request=request.strip(), budget_usd=budget_usd or settings.default_project_budget_usd,
+                        plan={"preferencias": prefs})
             s.add(p)
             s.flush()
             pid = p.id
@@ -237,17 +318,20 @@ class Orchestrator:
             team = self.team_of(s, p)
             team = [a for a in team if (a.config or {}).get("status", "active") == "active"]
             request, title = p.request, p.title
+            prefs = dict((p.plan or {}).get("preferencias") or {})
         if not coord or not team:
             self.set_project(project_id, status="failed", error="A organização não possui agentes ativos.")
             return
         self.agent_state(coord.id, "planning", project_id=project_id)
         roster = [{"id": a.id, "name": a.name, "role": a.role, "department": a.department, "tools": (a.config or {}).get("tools", [])} for a in team]
-        user = P.plan_prompt(request + (f"\n\nAjustes pedidos pelo gestor: {note}" if note else ""), roster, settings.max_tasks_per_project)
+        user = P.plan_prompt(request + (f"\n\nAjustes pedidos pelo gestor: {note}" if note else ""), roster, settings.max_tasks_per_project,
+                             prefs.get("tipo_solicitado", ""), prefs.get("extensao", "padrao"))
         try:
-            r = await self.llm(project_id=project_id, task_id=None, agent=coord, purpose="plan", json_mode=True, max_tokens=3000,
+            r = await self.llm(project_id=project_id, task_id=None, agent=coord, purpose="plan", json_mode=True, max_tokens=6000,
                                messages=[{"role": "system", "content": P.agent_system(coord.config or {}, coord.name, coord.role)}, {"role": "user", "content": user}])
             plan = parse_json(r.text)
             tasks = self.validate_plan(plan, team)
+            briefing, outline = normalize_brief(plan, request, prefs.get("tipo_solicitado", ""), prefs.get("extensao", "padrao"))
         except (LLMError, ValueError, StopProject) as exc:
             self.agent_state(coord.id, "failed", project_id=project_id)
             self.set_project(project_id, status="failed", error=f"Falha no planejamento: {exc}")
@@ -259,13 +343,23 @@ class Orchestrator:
             for i, t in enumerate(tasks):
                 s.add(Task(project_id=project_id, position=i, status="proposed", steps_total=STEPS[t["kind"]], **{k: t[k] for k in ("key", "title", "description", "kind", "agent_id", "depends_on", "deliverable")}))
             p = s.get(Project, project_id)
-            plan["estimativa_custo_usd"] = round(len(tasks) * 0.02, 4)
+            calls = sum({"research": 2, "writing": len(outline) + 1}.get(t["kind"], 1) for t in tasks) + len(outline)  # + 1 ciclo de revisão
+            plan["estimativa_custo_usd"] = round(calls * 0.004, 4)
+            plan["estimativa_chamadas"] = calls
             plan["estimativa_e_aproximada"] = True
+            plan["briefing"], plan["estrutura"], plan["preferencias"] = briefing, outline, prefs
+            plan["estimativa_tempo_min"] = estimate_minutes(tasks, len(outline))
+            plan["papeis"] = [{"agentId": t["agent_id"], "tarefa": t["key"], "papel": t.get("papel", "")} for t in tasks]
+            if prefs.get("titulo_automatico") and briefing.get("titulo"):
+                p.title = briefing["titulo"]
+                title = p.title
             p.plan = plan
             p.status = "awaiting_approval"
             s.add(Approval(project_id=project_id, kind="plan"))
         self.agent_state(coord.id, "idle", project_id=project_id)
-        self.message(project_id, "solicitacao", f"Plano proposto com {len(tasks)} tarefas para '{title}'.", from_agent=coord.id, to_kind="user")
+        est = estimate_minutes(tasks, len(outline))
+        self.message(project_id, "solicitacao", f"Interpretei o pedido como {briefing['tipo_nome']} (~{briefing['palavras_alvo']} palavras, {len(outline)} seções). "
+                     f"Plano com {len(tasks)} tarefas para '{title}' — tempo estimado {est['min']}–{est['max']} min.", from_agent=coord.id, to_kind="user")
         self.ask_decision(project_id, f"Plano de {len(tasks)} tarefas pronto para '{title}'. Revise, ajuste e aprove para iniciar a execução.")
         self.project_event(project_id)
 
@@ -285,25 +379,26 @@ class Orchestrator:
             kind = KIND_MAP.get(str(t.get("tipo", "geral")).lower().strip(), "general")
             aid = t.get("agente_id")
             if aid not in by_id:  # mapeia por papel se o modelo errar o id
-                aid = next((a.id for a in team if kind == "review" and "revis" in a.role.lower()), None) or \
-                      next((a.id for a in team if kind == "writing" and "redat" in a.role.lower()), None) or \
-                      next((a.id for a in team if kind in ("research", "analysis") and ("pesquis" in a.role.lower() or "analis" in a.role.lower())), team[0].id)
+                guess = {"review": ("revisor", "revisão crítica", "qualidade"), "writing": ("redat", "redação"), "research": ("pesquisador", "pesquisa"),
+                         "analysis": ("analista", "análise")}.get(kind, ("especialista", "analista"))
+                aid = (find_agent(team, *guess) or team[0]).id
             if kind == "research" and "literature_search" not in ((by_id[aid].config or {}).get("tools") or []):
                 # ferramenta não autorizada para o agente: realoca para quem possui a integração
                 aid = next((a.id for a in team if "literature_search" in ((a.config or {}).get("tools") or [])), aid)
             tasks.append({"key": key, "title": str(t.get("titulo", f"Tarefa {i + 1}"))[:200], "description": str(t.get("descricao", "")),
-                          "kind": kind, "agent_id": aid, "depends_on": [str(d) for d in (t.get("depende_de") or [])], "deliverable": str(t.get("entregavel", ""))[:200]})
+                          "kind": kind, "agent_id": aid, "depends_on": [str(d) for d in (t.get("depende_de") or [])], "deliverable": str(t.get("entregavel", ""))[:200],
+                          "papel": str(t.get("papel_no_projeto") or "")[:300]})
         valid = {t["key"] for t in tasks}
         for t in tasks:
             t["depends_on"] = [d for d in t["depends_on"] if d in valid and d != t["key"]]
         # garante redação e revisão (critério de conclusão)
         if not any(t["kind"] == "writing" for t in tasks):
-            writer = next((a for a in team if "redat" in a.role.lower()), team[0])
+            writer = find_agent(team, "redat", "redação") or team[0]
             tasks.append({"key": "TW", "title": "Consolidar documento final", "description": "Integrar as entregas no relatório.", "kind": "writing",
                           "agent_id": writer.id, "depends_on": [t["key"] for t in tasks], "deliverable": "Relatório"})
         writing = next(t for t in tasks if t["kind"] == "writing")
         if not any(t["kind"] == "review" for t in tasks):
-            rev = next((a for a in team if "revis" in a.role.lower()), team[-1])
+            rev = find_agent(team, "revisor", "revisão crítica", "qualidade") or team[-1]
             tasks.append({"key": "TR", "title": "Revisar relatório", "description": "Verificar evidências e qualidade.", "kind": "review",
                           "agent_id": rev.id, "depends_on": [writing["key"]], "deliverable": "Parecer de revisão"})
         # sem ciclos (ordenação topológica)
@@ -656,26 +751,65 @@ class Orchestrator:
     async def _analysis(self, t, p, agent, system, inputs, guidance, evs) -> str:
         self.step(t, agent.id, p.id, 0, "reunindo entregas")
         self.agent_state(agent.id, "working", t, project_id=p.id)
-        block = "\n\n".join(f"<documento autor=\"{a.title}\">\n{c[:6000]}\n</documento>" for _, a, c in inputs) or "(sem entregas anteriores)"
+        block = "\n\n".join(f"<documento autor=\"{a.title}\">\n{c[:8000]}\n</documento>" for _, a, c in inputs) or "(sem entregas anteriores)"
+        if t.kind == "general":  # especialista (revisão da literatura, fundamentação, metodologia...)
+            self.step(t, agent.id, p.id, 1, f"elaborando entrega de {agent.role[:60]}")
+            briefing = (p.plan or {}).get("briefing") or {}
+            r = await self.llm(project_id=p.id, task_id=t.id, agent=agent, purpose="specialist", max_tokens=6000,
+                               messages=[system, {"role": "user", "content": P.specialist_prompt(agent.role, t.title, t.description, p.request, briefing, block, P.evidence_block(evs), guidance)}])
+            return self._save_artifact(p.id, t, agent, t.deliverable or t.title, "specialist", r.text)
         self.step(t, agent.id, p.id, 1, "analisando")
-        r = await self.llm(project_id=p.id, task_id=t.id, agent=agent, purpose="analysis",
+        r = await self.llm(project_id=p.id, task_id=t.id, agent=agent, purpose="analysis", max_tokens=6000,
                            messages=[system, {"role": "user", "content": P.analysis_prompt(t.title, t.description, block, P.evidence_block(evs), guidance)}])
         return self._save_artifact(p.id, t, agent, f"Análise: {t.title}", "analysis", r.text)
 
+    def _outline(self, p) -> tuple[dict, list[dict]]:
+        plan = p.plan or {}
+        b, o = plan.get("briefing"), plan.get("estrutura")
+        if not b or not o:  # projetos antigos / tarefas avulsas: estrutura-base
+            b, o = normalize_brief({}, p.request, "relatorio_tecnico" if plan.get("tarefa_avulsa") else "", (plan.get("preferencias") or {}).get("extensao", "padrao"))
+        return b, o
+
     async def _writing(self, t, p, agent, system, inputs, guidance, evs) -> str:
+        """Documento final escrito SEÇÃO POR SEÇÃO (cada seção é uma chamada) — permite entregas extensas e coerentes."""
+        briefing, outline = self._outline(p)
+        total = len(outline) + 3
+        with session_scope() as s:
+            s.get(Task, t.id).steps_total = total
         self.step(t, agent.id, p.id, 0, "reunindo entregas da equipe")
         self.agent_state(agent.id, "working", t, project_id=p.id)
-        block = "\n\n".join(f"<documento titulo=\"{a.title}\">\n{c[:7000]}\n</documento>" for _, a, c in inputs)
-        self.step(t, agent.id, p.id, 1, "redigindo relatório")
-        r = await self.llm(project_id=p.id, task_id=t.id, agent=agent, purpose="report", max_tokens=6000,
-                           messages=[system, {"role": "user", "content": P.report_prompt(p.title, p.request, p.plan or {}, block, P.evidence_block(evs), guidance)}])
-        self.step(t, agent.id, p.id, 2, "gerando referências a partir das evidências")
+        per = max(2500, 24000 // max(1, len(inputs)))
+        block = "\n\n".join(f"<documento titulo=\"{a.title}\">\n{c[:per]}\n</documento>" for _, a, c in inputs) or "(sem entregas anteriores)"
+        ev = P.evidence_block(evs)
+        sections: list[str] = []
+        for i, sec in enumerate(outline):
+            self.step(t, agent.id, p.id, i + 1, f"redigindo seção {i + 1}/{len(outline)}: {sec['titulo'][:60]}")
+            prev = sections[-1][-1500:] if sections else ""
+            r = await self.llm(project_id=p.id, task_id=t.id, agent=agent, purpose="report", max_tokens=min(8000, int(sec["palavras"] * 2.2) + 600),
+                               messages=[system, {"role": "user", "content": P.section_prompt(p.title, briefing, outline, i, block, ev, prev, guidance)}])
+            text = r.text.strip()
+            if not text.lstrip().startswith("#"):
+                text = f"## {i + 1}. {sec['titulo']}\n\n{text}"
+            text = re.split(r"\n#{1,3}\s*Refer[êe]ncias", text)[0].rstrip()
+            sections.append(text)
+        self.step(t, agent.id, p.id, len(outline) + 1, "redigindo resumo e palavras-chave")
+        digest = "\n".join(sec[:700] for sec in sections)
+        try:
+            r = await self.llm(project_id=p.id, task_id=t.id, agent=agent, purpose="abstract", json_mode=True, max_tokens=900,
+                               messages=[system, {"role": "user", "content": P.abstract_prompt(p.title, briefing, digest)}])
+            ab = parse_json(r.text)
+            abstract = f"## Resumo\n\n{ab.get('resumo', '').strip()}\n\n**Palavras-chave:** {'; '.join(ab.get('palavras_chave') or [])}"
+        except (LLMError, ValueError):
+            abstract = "## Resumo\n\n[RESUMO NÃO GERADO — falha ao consolidar o resumo; solicite revisão]"
+        self.step(t, agent.id, p.id, len(outline) + 2, "gerando sumário e referências a partir das evidências")
         with session_scope() as s:  # citações de códigos fora do contexto ainda são resolvidas se existirem no projeto
             proj_evs = list(s.scalars(select(Evidence).where(Evidence.project_id == p.id)))
             for e in proj_evs:
                 s.expunge(e)
-        content, note = with_references(r.text, proj_evs)
-        return self._save_artifact(p.id, t, agent, f"Relatório: {p.title}", "report", content, note=note)
+        doc = assemble_document(p.title, briefing, abstract, sections)
+        content, note = with_references(doc, proj_evs)
+        words = len(re.findall(r"\w+", content))
+        return self._save_artifact(p.id, t, agent, f"{briefing.get('tipo_nome', 'Relatório')}: {p.title}", "report", content, note=f"{len(outline)} seções, ~{words} palavras; {note}")
 
     async def _review(self, t, p, agent, system) -> str:
         self.step(t, agent.id, p.id, 0, "lendo documento")
@@ -696,8 +830,10 @@ class Orchestrator:
             s.get(Task, t.id).context = {"inputs": [{"artifactId": report.id, "code": report.code, "title": report.title, "version": report.current_version, "fromTask": None}],
                                          "evidence": [e.code for e in scoped], "guidanceMessages": 0}
         self.step(t, agent.id, p.id, 1, "verificando evidências e citações")
-        r = await self.llm(project_id=p.id, task_id=t.id, agent=agent, purpose="review", json_mode=True, max_tokens=2500,
-                           messages=[system, {"role": "user", "content": P.review_prompt(content, P.evidence_block(scoped), (p.plan or {}).get("criterios_qualidade", []))}])
+        briefing, _outline = self._outline(p)
+        r = await self.llm(project_id=p.id, task_id=t.id, agent=agent, purpose="review", json_mode=True, max_tokens=4000,
+                           messages=[system, {"role": "user", "content": P.review_prompt(content, P.evidence_block(scoped), (p.plan or {}).get("criterios_qualidade", []),
+                                                                                           P.DELIVERABLES.get(briefing.get("tipo_entrega", "")), briefing)}])
         rv = parse_json(r.text)
         bad = invalid_citations(content, evs)
         problems = rv.get("problemas") or []
@@ -707,10 +843,15 @@ class Orchestrator:
         if unconfirmed:
             problems.append({"trecho": ", ".join(unconfirmed), "problema": "Referência sem confirmação independente (Crossref/arXiv)",
                              "sugestao": "Conferir manualmente ou tratar a afirmação como não confirmada"})
-        approved = bool(rv.get("aprovado")) and not bad
+        notas = {k: v for k, v in (rv.get("notas") or {}).items() if isinstance(v, (int, float))}
+        approved = bool(rv.get("aprovado")) and not bad and not any(str(x.get("gravidade", "")).lower() in ("critico", "crítico") for x in problems)
         md = [f"# Parecer de revisão — {'APROVADO' if approved else 'REVISÃO NECESSÁRIA'}", "", rv.get("resumo", ""), ""]
+        if notas:
+            md += ["## Avaliação", "", "| Critério | Nota (0–10) |", "|---|---|"] + [f"| {k.capitalize()} | {v} |" for k, v in notas.items()] + [""]
+        cell = lambda v: str(v or "").replace("|", "/").replace("\n", " ")
         if problems:
-            md += ["## Problemas", "", "| Trecho | Problema | Sugestão |", "|---|---|---|"] + [f"| {x.get('trecho','')} | {x.get('problema','')} | {x.get('sugestao','')} |" for x in problems]
+            md += ["## Problemas", "", "| Seção | Gravidade | Trecho | Problema | Sugestão |", "|---|---|---|---|---|"] + \
+                  [f"| {cell(x.get('secao'))} | {cell(x.get('gravidade'))} | {cell(x.get('trecho'))} | {cell(x.get('problema'))} | {cell(x.get('sugestao'))} |" for x in problems]
         if rv.get("afirmacoes_sem_evidencia"):
             md += ["", "## Afirmações sem evidência suficiente", ""] + [f"- {x}" for x in rv["afirmacoes_sem_evidencia"]]
         art = self._save_artifact(p.id, t, agent, "Parecer de revisão", "review", "\n".join(md))
@@ -721,7 +862,7 @@ class Orchestrator:
             n = s.scalar(select(func.count()).select_from(Task).where(Task.project_id == p.id)) or 0
             if not approved and pp.auto_revisions < settings.max_auto_revisions and writer_id and n < settings.max_total_tasks_per_project:
                 pp.auto_revisions += 1
-                req = "\n".join(f"- {x.get('problema')}: {x.get('sugestao')} (trecho: {x.get('trecho')})" for x in problems) + "\n" + "\n".join(f"- Fundamentar ou remover: {x}" for x in rv.get("afirmacoes_sem_evidencia") or [])
+                req = "\n".join(f"- [{x.get('secao') or 'geral'}] {x.get('problema')}: {x.get('sugestao')} (trecho: {x.get('trecho')})" for x in problems) + "\n" + "\n".join(f"- Fundamentar ou remover: {x}" for x in rv.get("afirmacoes_sem_evidencia") or [])
                 s.add(Task(project_id=p.id, key=unique_key(s, p.id, "RV"), title="Aplicar revisão do revisor", description=req, kind="revision", agent_id=writer_id,
                            depends_on=[t.key], status="pending", steps_total=STEPS["revision"], target_artifact_id=report.id, position=n))
             elif not approved:
@@ -754,12 +895,43 @@ class Orchestrator:
                           "evidence": sorted(allowed & {e.code for e in all_evs}, key=lambda c: int(c[1:]) if c[1:].isdigit() else 0)}
         body = re.split(r"\n#{1,3}\s*Refer[êe]ncias", content)[0]
         upd = "\n\n".join(f"<documento titulo=\"{a.title}\" versao=\"{a.current_version}\">\n{c[:6000]}\n</documento>" for _, a, c in inputs)
+        requests = (t.description + "\n" + guidance).strip()
+        if art_kind == "report" and body.count("\n## ") >= 3:
+            new = await self._revise_sections(t, p, agent, system, body, requests, P.evidence_block(evs), upd)
+            self.step(t, agent.id, p.id, 2, "registrando nova versão")
+            new, note = with_references(new, all_evs)
+            return self._save_artifact(p.id, t, agent, "", art_kind, new, note=f"Revisão: {t.title}. {note}".strip(), artifact_id=art_id)
         self.step(t, agent.id, p.id, 1, "revisando documento")
         r = await self.llm(project_id=p.id, task_id=t.id, agent=agent, purpose="revision", max_tokens=6000,
                            messages=[system, {"role": "user", "content": P.revision_prompt(body, (t.description + "\n" + guidance).strip(), P.evidence_block(evs), upd)}])
         self.step(t, agent.id, p.id, 2, "registrando nova versão")
         new, note = (with_references(r.text, all_evs) if art_kind == "report" else (r.text, ""))
         return self._save_artifact(p.id, t, agent, "", art_kind, new, note=f"Revisão: {t.title}. {note}".strip(), artifact_id=art_id)
+
+    async def _revise_sections(self, t, p, agent, system, body: str, requests: str, evidence: str, upd: str) -> str:
+        """Revisa somente as seções apontadas (pelo título) ou, sem indicação, todas — sem encurtar o documento."""
+        head, *secs = re.split(r"(?m)^(?=## )", body)
+        def norm(x):
+            return re.sub(r"[^a-z0-9à-ú ]", "", re.sub(r"^#+\s*\d*\.?\s*", "", x.lower())).strip()
+        named = [norm(m) for m in re.findall(r"^- \[([^\]]+)\]", requests, re.M) if norm(m) not in ("", "geral")]
+        def hit(sec):
+            title = norm(sec.split("\n", 1)[0])
+            return any(n and (n in title or title in n) for n in named)
+        targets = [i for i, sec in enumerate(secs) if hit(sec)] if named else []
+        if not targets or len(named) < len(re.findall(r"^- ", requests, re.M)):  # há pedidos gerais: revisa todas as seções de conteúdo
+            targets = [i for i, sec in enumerate(secs) if not sec.lower().startswith(("## resumo", "## sumário", "## sumario"))]
+        with session_scope() as s:
+            s.get(Task, t.id).steps_total = len(targets) + 3
+        out = list(secs)
+        for n, i in enumerate(targets):
+            self.step(t, agent.id, p.id, n + 1, f"revisando seção {n + 1}/{len(targets)}")
+            r = await self.llm(project_id=p.id, task_id=t.id, agent=agent, purpose="revision", max_tokens=8000,
+                               messages=[system, {"role": "user", "content": P.section_revision_prompt(secs[i], requests, evidence, upd)}])
+            txt = re.split(r"\n#{1,3}\s*Refer[êe]ncias", r.text.strip())[0].rstrip()
+            # proteção: resposta muito menor que a original indica truncamento — mantém a original
+            out[i] = (txt if txt.startswith("#") and len(txt) >= 0.5 * len(secs[i].strip()) else secs[i].rstrip()) + "\n\n"
+        doc = head + "".join(x if x.endswith("\n\n") else x.rstrip() + "\n\n" for x in out)
+        return rebuild_toc(doc)
 
     # ------------------------------------------------------------------ gestão humana
     def feedback(self, project_id: str, artifact_id: str | None, text: str, agent_id: str | None = None, task_id: str | None = None) -> dict:
@@ -1106,6 +1278,26 @@ def with_references(text: str, evs: list[Evidence]) -> tuple[str, str]:
     ok = sum(1 for c in cited_codes(body) if c in by and by[c].verification == "verificada")
     note = f"{len(refs)} referências ({ok} verificadas, {len(refs) - ok} não confirmadas)" + (f"; citações inexistentes: {', '.join(bad)}" if bad else "")
     return body + "\n\n## Referências\n\n" + ("\n".join(refs) or "_Nenhuma fonte citada._") + "\n", note
+
+
+def rebuild_toc(doc: str) -> str:
+    """Atualiza o sumário a partir dos títulos (##) do documento."""
+    heads = [h for h in re.findall(r"(?m)^## (.+)$", doc) if not h.lower().startswith(("sumário", "sumario", "referências", "referencias"))]
+    toc = "## Sumário\n\n" + "\n".join(f"- {h.strip()}" for h in heads) + "\n"
+    if re.search(r"(?m)^## Sum[áa]rio\s*$", doc):
+        return re.sub(r"(?ms)^## Sum[áa]rio\s*\n.*?(?=^## )", toc + "\n", doc, count=1)
+    return doc
+
+
+def assemble_document(title: str, briefing: dict, abstract: str, sections: list[str]) -> str:
+    meta = [f"# {title}", "", f"**Tipo de entrega:** {briefing.get('tipo_nome', 'Documento')}  "]
+    if briefing.get("pergunta_pesquisa"):
+        meta.append(f"**Pergunta de pesquisa:** {briefing['pergunta_pesquisa']}  ")
+    if briefing.get("objetivo_geral"):
+        meta.append(f"**Objetivo geral:** {briefing['objetivo_geral']}  ")
+    meta.append("**Produção:** equipe de agentes de IA do AgentsLab_Studio, com revisão crítica entre agentes — requer validação humana antes de uso acadêmico.")
+    doc = "\n".join(meta) + "\n\n" + abstract.strip() + "\n\n## Sumário\n\n-\n\n" + "\n\n".join(x.strip() for x in sections) + "\n"
+    return rebuild_toc(doc)
 
 
 def diff_versions(a: str, b: str) -> str:

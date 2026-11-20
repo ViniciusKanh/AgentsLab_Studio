@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { emptyDraft, validateStep } from '@/features/agents/agentForm'
 import type { ProviderId } from '@/types/domain'
 
-const models = { gemini: ['gemini-2.5-flash', 'gemini-2.5-pro'], groq: [], openai: [], huggingface: [], ollama: [] } as Record<ProviderId, string[]>
+const models = { gemini: ['gemini-2.5-flash', 'gemini-2.5-pro'], groq: [], openai: [] } as Record<ProviderId, string[]>
 
 describe('validação do Agent Studio', () => {
   it('exige nome e objetivo na identidade', () => {

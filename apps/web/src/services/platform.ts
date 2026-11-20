@@ -1,5 +1,5 @@
 import type {
-  AgentActivity, AgentMessage, Artifact, ArtifactContent, Evidence, Execution, Organization, OrgTemplate, Overview, Project, ProjectTask, ToolCall, Usage,
+  AgentActivity, AgentMessage, Artifact, ArtifactContent, DeliverableType, Evidence, Execution, Organization, OrgTemplate, Overview, Project, ProjectTask, ToolCall, Usage,
 } from '@/types/platform'
 import type { Provider } from '@/types/domain'
 import { errorText } from './api/apiDataSource'
@@ -25,7 +25,8 @@ export const platform = {
 
   projects: (organizationId?: string) => http<Project[]>(`/projects${organizationId ? `?organizationId=${organizationId}` : ''}`),
   project: (id: string) => http<Project>(`/projects/${id}`),
-  createProject: (b: { request: string; title?: string; organizationId: string | null; budgetUsd?: number }) => post<Project>('/projects', b),
+  createProject: (b: { request: string; title?: string; organizationId: string | null; budgetUsd?: number; deliverableType?: string; length?: string }) => post<Project>('/projects', b),
+  deliverableTypes: () => http<{ types: { id: DeliverableType; name: string; words: number; sections: string[] }[]; lengthFactor: Record<string, number> }>('/projects/deliverable-types'),
   editPlan: (id: string, tasks: Partial<ProjectTask>[]) => put<Project>(`/projects/${id}/plan`, { tasks }),
   decidePlan: (id: string, approve: boolean, note = '') => post<Project>(`/projects/${id}/plan/decision`, { approve, note }),
   decideDelivery: (id: string, approve: boolean, note = '') => post<Project>(`/projects/${id}/delivery/decision`, { approve, note }),
@@ -83,7 +84,7 @@ export const PROJECT_STATUS: Record<string, { label: string; color: string }> = 
 }
 
 export const TASK_KIND: Record<string, string> = {
-  research: 'Pesquisa', analysis: 'Análise', writing: 'Redação', review: 'Revisão', revision: 'Revisão de versão', general: 'Geral',
+  research: 'Pesquisa', analysis: 'Análise', writing: 'Redação', review: 'Revisão', revision: 'Revisão de versão', general: 'Especialista',
 }
 
 export const MESSAGE_TYPE: Record<string, { label: string; color: string }> = {

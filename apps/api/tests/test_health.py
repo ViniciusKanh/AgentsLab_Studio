@@ -10,7 +10,7 @@ def test_organizacoes_iniciais(client):
     from conftest import org_id
 
     agents = client.get("/api/v1/agents", params={"organizationId": org_id(client)}).json()
-    assert len(agents) == 6 and sum(a["isCoordinator"] for a in agents) == 1
+    assert len(agents) == 9 and sum(a["isCoordinator"] for a in agents) == 1
     assert all("xp" not in a and "level" not in a for a in agents)
 
 

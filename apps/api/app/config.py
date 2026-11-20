@@ -21,12 +21,12 @@ class Settings(BaseSettings):
     secret_backend: str = "auto"
     # Usado apenas pelo backend "file" (CI/servidores sem cofre do SO)
     master_key: str = ""
-    ollama_base_url: str = "http://localhost:11434"
     # Limites padrão de segurança/custo
     default_project_budget_usd: float = 2.0
     max_tasks_per_project: int = 10
-    max_llm_calls_per_project: int = 60
-    max_auto_revisions: int = 1
+    max_llm_calls_per_project: int = 150
+    # ciclos automáticos revisor → redator (reavaliação entre agentes)
+    max_auto_revisions: int = 2
     task_concurrency: int = 3
     # chamadas simultâneas por provedor (respeita limites de requisição — ex.: plano gratuito do Gemini)
     provider_concurrency: int = 2
@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     llm_max_retries: int = 2
     llm_retry_base_sec: float = 4.0
     # tempo máximo de uma tarefa inteira (todas as chamadas e ferramentas)
-    task_timeout_sec: int = 900
+    task_timeout_sec: int = 2400  # documentos extensos: uma chamada por seção
     # teto de tarefas do projeto incluindo revisões, feedbacks e propagações (evita delegação sem fim)
     max_total_tasks_per_project: int = 30
     # verificação independente de referências (Crossref / arXiv)

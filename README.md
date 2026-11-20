@@ -51,7 +51,7 @@
 | **Evidências** | Busca no OpenAlex e no arXiv; verificação independente no Crossref/arXiv; referências geradas pelo sistema; citações inexistentes sinalizadas | Implementado; testado com ferramentas de teste |
 | **Documentos** | Código (D1, D2…), autoria, versão, data, projeto, tarefa de origem; histórico, diff e download `.md` com cabeçalho | Implementado e testado |
 | **Feedback** | Em documento ou tarefa; vai ao agente responsável e propaga às dependentes (FB → UP → RR), com nova revisão | Implementado e testado |
-| **Provedores e custos** | Gemini, Groq, OpenAI, Hugging Face, Ollama (LiteLLM); modelos testados com a sua chave; tokens e custo por agente, tarefa, modelo e projeto; orçamento por projeto | Implementado e testado |
+| **Provedores e custos** | Gemini, Groq e OpenAI (LiteLLM); modelos testados com a sua chave; tokens e custo por agente, tarefa, modelo e projeto; orçamento por projeto | Implementado e testado |
 | **Mundo pixel art** | Escritório e laboratório (Phaser + A\*); estados reais (pesquisando, redigindo, revisando, aguardando dependência); entregas com caminhada até o colega; painel "Trabalho" do agente | Implementado e testado |
 | **Fluxos** | Editor visual de workflows com validação e ordem de execução | Implementado; execução pelo editor planejada |
 | **RAG / PDFs / desktop** | Upload de documentos (pgvector), texto completo de artigos, app Tauri para a Microsoft Store | Planejado ([ROADMAP](docs/ROADMAP.md)) |
@@ -108,7 +108,7 @@ flowchart LR
   RT -- "SSE ?access_token" --> E
   R -- "valida JWT (JWKS)" --> AUTH
   API --> PG
-  L --> P[(Gemini · Groq · OpenAI<br/>Hugging Face · Ollama)]
+  L --> P[(Gemini · Groq · OpenAI)]
 ```
 
 **Fluxo de um projeto**
